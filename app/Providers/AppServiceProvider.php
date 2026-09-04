@@ -46,6 +46,12 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(10)->by('ip:'.$request->ip());
         });
 
+        RateLimiter::for('admin-translate', function (Request $request) {
+            // The upstream translate endpoint is unauthenticated and unofficial — keeping
+            // this well under admin-api's 300/min limits how hard one admin can hit it.
+            return Limit::perMinute(30)->by('admin:'.$request->user()?->id);
+        });
+
         RateLimiter::for('api', function (Request $request) {
             return Limit::perMinute(120)->by($request->user()?->id ?: $request->ip());
         });

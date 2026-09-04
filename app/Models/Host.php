@@ -60,6 +60,11 @@ class Host extends Model
         return $this->hasMany(HostTarget::class)->orderByDesc('period_start');
     }
 
+    public function giftTargetResults(): HasMany
+    {
+        return $this->hasMany(HostGiftTargetResult::class)->orderByDesc('period');
+    }
+
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('status', self::APPROVED);

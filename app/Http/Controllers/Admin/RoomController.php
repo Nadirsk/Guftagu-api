@@ -22,9 +22,11 @@ use Illuminate\Validation\Rule;
 /**
  * Epic A.4 — room monitoring and enforcement. docs/03 §10.
  *
- * `listener_count` is denormalised from Redis every 10 s by the realtime layer, so these
- * figures are recent rather than live. Until that layer exists (E.1), they are whatever
- * was last written to MySQL — the response says so via `realtime`.
+ * The stored `listener_count` column is meant to be denormalised from Redis every 10 s by
+ * the realtime layer (E.1), which does not exist yet — nothing keeps that column current.
+ * Until it does, every payload here reports `activeMembers`' live count instead (a fresh
+ * `room_members` query/count, not a push feed — the response says so via `realtime`), so
+ * what the panel shows always agrees with who is actually marked joined right now.
  */
 class RoomController extends Controller
 {
@@ -56,6 +58,7 @@ class RoomController extends Controller
 
         $query = Room::query()
             ->with(['owner.profile:id,user_id,display_name', 'category:id,key,name_en'])
+            ->withCount('activeMembers')
             ->search($data['q'] ?? null)
             ->when($data['status'] ?? null, fn ($q, string $s) => $q->where('status', $s))
             ->when($data['category'] ?? null, fn ($q, int $c) => $q->where('category_id', $c))
@@ -88,22 +91,24 @@ class RoomController extends Controller
 
         $rooms = Room::query()
             ->with(['owner.profile:id,user_id,display_name', 'category:id,key,name_en'])
+            ->withCount('activeMembers')
             ->live()
             ->when($data['category'] ?? null, fn ($q, int $c) => $q->where('category_id', $c))
             ->orderByDesc('is_pinned')
-            ->orderByDesc('listener_count')
+            ->orderByDesc('active_members_count')
             ->limit((int) ($data['per_page'] ?? 48))
             ->get();
 
         return ApiResponse::success([
             'rooms'     => $rooms->map(fn (Room $room) => $this->rowPayload($room)),
             'total'     => $rooms->count(),
-            'listeners' => (int) $rooms->sum('listener_count'),
-            // Honest about where these numbers come from.
+            'listeners' => (int) $rooms->sum('active_members_count'),
+            // `listener_count` still exists for the historical/Redis-fed figure once E.1
+            // lands; until then the row payload reports who is actually joined right now.
             'realtime'  => [
                 'available' => false,
                 'source'    => 'database',
-                'note'      => 'Counts are the last value written to MySQL. Live Redis-backed figures arrive with the realtime layer (E.1).',
+                'note'      => 'Counts reflect room_members rows as of this request, not a push feed. Live Redis-backed figures arrive with the realtime layer (E.1).',
             ],
             'as_of' => now()->toIso8601ZuluString(),
         ]);
@@ -119,6 +124,7 @@ class RoomController extends Controller
             'owner.profile:id,user_id,display_name,avatar_url',
             'category:id,key,name_en',
             'theme:id,name,is_premium',
+            'seatTemplate:id,name,total_seats,vip_positions',
             'closedBy:id,name',
             'seats.user.profile:id,user_id,display_name,avatar_url',
         ]);
@@ -141,10 +147,17 @@ class RoomController extends Controller
             ->groupBy('user_id');
 
         return ApiResponse::success([
-            'room'  => $this->rowPayload($room),
+            'room'  => $this->rowPayload($room, $room->activeMembers()->count()),
+            'seat_template' => $room->seatTemplate === null ? null : [
+                'id'            => $room->seatTemplate->id,
+                'name'          => $room->seatTemplate->name,
+                'total_seats'   => $room->seatTemplate->total_seats,
+                'vip_positions' => $room->seatTemplate->vip_positions ?? [],
+            ],
             'seats' => $room->seats->map(fn ($seat) => [
                 'seat_number'      => $seat->seat_number,
                 'is_locked'        => $seat->is_locked,
+                'is_vip'           => $seat->is_vip,
                 'is_muted_by_host' => $seat->is_muted_by_host,
                 'is_camera_on'     => $seat->is_camera_on,
                 'occupied_at'      => $seat->occupied_at?->toIso8601ZuluString(),
@@ -298,6 +311,22 @@ class RoomController extends Controller
         return ApiResponse::success(null, 'Category changed');
     }
 
+    /** PATCH /admin/rooms/{room}/seat-template. */
+    public function setSeatTemplate(Request $request, Room $room): JsonResponse
+    {
+        $this->scope->guardRoomCategory($request->user(), $room->category_id, 'room');
+
+        $data = $request->validate([
+            'seat_template_id' => ['nullable', 'integer', Rule::exists('room_seat_templates', 'id')],
+        ]);
+
+        $updated = $this->rooms->setSeatTemplate($room, $data['seat_template_id'] ?? null, $request->user());
+
+        return ApiResponse::success([
+            'seat_template_id' => $updated->seat_template_id,
+        ], $updated->seat_template_id === null ? 'Seat template cleared' : 'Seat template applied');
+    }
+
     /** POST /admin/rooms/{room}/seats/{seat}/lock — C.2b. */
     public function lockSeat(Request $request, Room $room, int $seat): JsonResponse
     {
@@ -306,6 +335,18 @@ class RoomController extends Controller
         $this->rooms->setSeatLocked($room, $seat, (bool) $data['locked'], $request->user());
 
         return ApiResponse::success(null, $data['locked'] ? 'Seat locked' : 'Seat unlocked');
+    }
+
+    /** POST /admin/rooms/{room}/seats/{seat}/vip. */
+    public function vipSeat(Request $request, Room $room, int $seat): JsonResponse
+    {
+        $this->scope->guardRoomCategory($request->user(), $room->category_id, 'room');
+
+        $data = $request->validate(['vip' => ['required', 'boolean']]);
+
+        $this->rooms->setSeatVip($room, $seat, (bool) $data['vip'], $request->user());
+
+        return ApiResponse::success(null, $data['vip'] ? 'Seat marked VIP' : 'Seat unmarked');
     }
 
     /** POST /admin/rooms/{room}/silent-join — C.1b. */
@@ -392,7 +433,11 @@ class RoomController extends Controller
         return [$column, $descending ? 'desc' : 'asc'];
     }
 
-    protected function rowPayload(Room $room): array
+    /**
+     * `$liveListenerCount`, when given, comes from a fresh `activeMembers` count/eager-load
+     * rather than the denormalised `listener_count` column — see the class docblock.
+     */
+    protected function rowPayload(Room $room, ?int $liveListenerCount = null): array
     {
         return [
             'id'          => $room->id,
@@ -416,7 +461,7 @@ class RoomController extends Controller
             'seat_count'      => $room->seat_count,
             'seat_layout'     => $room->seat_layout,
             'video_enabled'   => $room->video_enabled,
-            'listener_count'  => $room->listener_count,
+            'listener_count'  => $liveListenerCount ?? $room->active_members_count ?? $room->listener_count,
             'peak_listeners'  => $room->peak_listeners,
             'diamonds'        => $room->total_diamonds_received,
             'is_pinned'       => $room->is_pinned,

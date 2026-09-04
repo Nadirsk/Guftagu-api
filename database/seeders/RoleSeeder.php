@@ -19,6 +19,14 @@ class RoleSeeder extends Seeder
         'admin'       => ['Admin', 'Full operational access except role management and platform settings.'],
         'manager'     => ['Manager', 'Agency, host and event operations within an assigned scope.'],
         'moderator'   => ['Moderator', 'Live room monitoring and reporting. Enforcement is granted individually.'],
+        // Holds the full permission catalogue (see the baseline below) — every screen and
+        // action any permission gates, same as an `admin` would reach plus the excludes.
+        // What it does NOT get is the handful of things wired to `Role::SUPER_ADMIN`
+        // specifically rather than to a permission key: the second-approval bypass on large
+        // withdrawals, immunity from scope restrictions, immunity from being banned, and
+        // editing another role's baseline without the escalation check. Those stay unique
+        // to Super Admin by design — see docs/02 §2.4 and PermissionResolver.
+        'it_admin'    => ['IT Admin', 'Full permission-based access, for troubleshooting anything platform-wide. Not a second Super Admin — see RoleSeeder.'],
     ];
 
     /**
@@ -28,6 +36,22 @@ class RoleSeeder extends Seeder
         'access.role_manage',
         'settings.manage',
         'economy.rates_manage',
+        // System diagnostics are IT Admin territory, not a general-ops grant. The route
+        // also carries `role:it_admin` (routes/api.php), which — unlike this permission
+        // key — is NOT satisfied by Super Admin's blanket bypass: only the actual IT
+        // Admin login can open this screen.
+        'system.logs_view',
+    ];
+
+    /**
+     * Permissions the `it_admin` baseline excludes even though it otherwise holds the full
+     * catalogue. Both of these surface *who else has panel access* — the Panel Users list
+     * and an individual admin's own permission grants, Super Admin included — and IT Admin
+     * is meant to see the platform's data, not the identity of everyone who can touch it.
+     */
+    public const IT_ADMIN_EXCLUDES = [
+        'access.admin_manage',
+        'access.permission_grant',
     ];
 
     public const MANAGER_BASELINE = [
@@ -47,6 +71,7 @@ class RoleSeeder extends Seeder
         // hosts.* except approve
         'hosts.view',
         'hosts.target_manage',
+        'hosts.gift_target_manage',
         'hosts.earnings_view',
         'events.view',
         'events.manage',
@@ -102,6 +127,11 @@ class RoleSeeder extends Seeder
             'admin'       => array_values(array_diff($allKeys, self::ADMIN_EXCLUDES)),
             'manager'     => self::MANAGER_BASELINE,
             'moderator'   => self::MODERATOR_BASELINE,
+            // Every key except IT_ADMIN_EXCLUDES, unlike `admin` — it_admin is meant to
+            // reach anything else a permission gates. Unlike super_admin this is real rows,
+            // not a short-circuit, because it is not meant to inherit super_admin's
+            // non-permission-based invariants.
+            'it_admin'    => array_values(array_diff($allKeys, self::IT_ADMIN_EXCLUDES)),
         ];
 
         foreach ($baselines as $roleKey => $keys) {

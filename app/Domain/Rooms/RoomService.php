@@ -7,6 +7,7 @@ use App\Models\AdminUser;
 use App\Models\ModerationLog;
 use App\Models\Room;
 use App\Models\RoomMember;
+use App\Models\RoomSeatTemplate;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -210,6 +211,96 @@ class RoomService
             'room_id'       => $room->id,
             'before'        => $before,
             'after'         => ['is_locked' => $locked, 'seat_number' => $seatNumber],
+            'ip'            => request()->ip(),
+        ]);
+    }
+
+    /**
+     * Assign (or clear) which seat template this room follows, and apply its VIP
+     * positions onto the room's actual seats right now — a one-time bulk write, the
+     * same shape as `setSeatVip` just applied to every position in the template at
+     * once. Positions past the room's own `seat_count` are ignored rather than
+     * rejected: the template may be sized for a different room.
+     *
+     * Clearing the template (`$templateId === null`) only unlinks it — it does not
+     * strip whatever `is_vip` flags are already on the room's seats, since those may
+     * include manual overrides made after the template was applied.
+     *
+     * @throws RoomException
+     */
+    public function setSeatTemplate(Room $room, ?int $templateId, AdminUser $actor): Room
+    {
+        $template = null;
+
+        if ($templateId !== null) {
+            $template = RoomSeatTemplate::find($templateId);
+
+            if ($template === null) {
+                throw new RoomException('NOT_FOUND', 'That seat template does not exist.', 404);
+            }
+        }
+
+        $before = ['seat_template_id' => $room->seat_template_id];
+
+        DB::transaction(function () use ($room, $template) {
+            $room->forceFill(['seat_template_id' => $template?->id])->save();
+
+            if ($template !== null) {
+                $vipPositions = $template->vip_positions ?? [];
+
+                $room->seats()->update(['is_vip' => false]);
+
+                if ($vipPositions !== []) {
+                    $room->seats()->whereIn('seat_number', $vipPositions)->update(['is_vip' => true]);
+                }
+            }
+        });
+
+        $this->audit->log(
+            $actor,
+            'room.seat_template_assign',
+            'rooms',
+            Room::class,
+            $room->id,
+            $before,
+            ['seat_template_id' => $template?->id],
+        );
+
+        return $room->refresh();
+    }
+
+    /**
+     * Mark or unmark a single seat VIP on this specific room. Independent of
+     * `room_seat_templates` — a template is only a reusable default a future
+     * room-creation flow can start from; this is the live, enforced state.
+     *
+     * @throws RoomException
+     */
+    public function setSeatVip(Room $room, int $seatNumber, bool $vip, AdminUser $actor): void
+    {
+        $seat = $room->seats()->where('seat_number', $seatNumber)->first();
+
+        if ($seat === null) {
+            throw new RoomException('NOT_FOUND', 'That seat does not exist in this room.', 404);
+        }
+
+        $before = ['is_vip' => $seat->is_vip];
+
+        $seat->forceFill(['is_vip' => $vip])->save();
+
+        $action = $vip ? 'room.seat_vip' : 'room.seat_unvip';
+        $after = ['is_vip' => $vip, 'seat_number' => $seatNumber];
+
+        $this->audit->log($actor, $action, 'rooms', Room::class, $room->id, $before, $after);
+
+        ModerationLog::create([
+            'admin_user_id' => $actor->id,
+            'action'        => $action,
+            'target_type'   => Room::class,
+            'target_id'     => (string) $room->id,
+            'room_id'       => $room->id,
+            'before'        => $before,
+            'after'         => $after,
             'ip'            => request()->ip(),
         ]);
     }

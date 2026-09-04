@@ -2039,6 +2039,335 @@
                 ]
             }
         },
+        "/admin/gift-target-policies": {
+            "get": {
+                "tags": [
+                    "Hosts"
+                ],
+                "summary": "The monthly gift-target ladder",
+                "description": "mehfil's \"Policies\" screen, ported. Separate from `/admin/hosts/targets` above — that is a bespoke per-host target an admin sets, paying only the host a percentage of their diamond earnings; this is a shared ladder any host qualifies into automatically each calendar month by clearing a flat coins-sent + minutes-live threshold, paying both the host and their agency a flat amount.",
+                "operationId": "2a11bfeca6ce18917cc4bea6389fde3a",
+                "parameters": [
+                    {
+                        "name": "include_inactive",
+                        "in": "query",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Hosts"
+                ],
+                "summary": "Add a rung to the ladder",
+                "operationId": "1347ab4a1031975b4be69accef5184cf",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "time_minutes",
+                                    "target_coins"
+                                ],
+                                "properties": {
+                                    "time_minutes": {
+                                        "description": "Monthly cumulative minutes seated as owner/speaker",
+                                        "type": "integer",
+                                        "minimum": 0
+                                    },
+                                    "target_coins": {
+                                        "description": "Monthly cumulative coins spent sending gifts",
+                                        "type": "integer",
+                                        "minimum": 0
+                                    },
+                                    "host_reward_paise": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                    },
+                                    "agency_reward_paise": {
+                                        "description": "Paid only if the host has an agency",
+                                        "type": "integer",
+                                        "minimum": 0
+                                    },
+                                    "is_active": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/gift-target-policies/{policy}": {
+            "patch": {
+                "tags": [
+                    "Hosts"
+                ],
+                "summary": "Update a rung",
+                "operationId": "20577afb07ffc4b3f7c92448e0d6e036",
+                "parameters": [
+                    {
+                        "name": "policy",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/hosts/gift-targets": {
+            "get": {
+                "tags": [
+                    "Hosts"
+                ],
+                "summary": "Gift-target results for a month, scoped",
+                "operationId": "fe1961ddaf8d77c6db797ca70315014f",
+                "parameters": [
+                    {
+                        "name": "period",
+                        "in": "query",
+                        "description": "YYYY-MM",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/hosts/gift-targets/tracker": {
+            "get": {
+                "tags": [
+                    "Hosts"
+                ],
+                "summary": "One progress row per active host, always — the Hosts page's Targets tab",
+                "description": "Unlike `/admin/hosts/gift-targets` (which only lists hosts already evaluated for a month),\nthis always returns every scoped active host, whether or not they have been evaluated yet.\n\nA host already evaluated for the requested month (current month by default) shows their\nfrozen result. Everyone else shows **live** progress toward the ladder — the lowest rung\nthey have not yet fully cleared, with a `coins_pct` and `minutes_pct` against that rung's\ntwo thresholds separately, plus their blended `overall_pct`. `source` says which case\napplies, the same distinction `HostTargetRow.source` already makes for A.8b's targets.",
+                "operationId": "279d185304e4aff4d23744b65b960cf4",
+                "parameters": [
+                    {
+                        "name": "period",
+                        "in": "query",
+                        "description": "YYYY-MM, defaults to the current month",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/hosts/gift-targets/evaluate-all": {
+            "post": {
+                "tags": [
+                    "Hosts"
+                ],
+                "summary": "Evaluate every host for a month, in one pass",
+                "description": "The admin-triggered equivalent of mehfil's `salary:distribute-host` cron — an explicit action rather than an unattended nightly job, so it shows up in the audit log against whoever ran it. Already-evaluated hosts for that month are skipped, not re-run.",
+                "operationId": "eaa594be2aac6ab62cea18e0f6266a27",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "period"
+                                ],
+                                "properties": {
+                                    "period": {
+                                        "type": "string",
+                                        "example": "2026-09"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/hosts/{host}/gift-targets/evaluate": {
+            "post": {
+                "tags": [
+                    "Hosts"
+                ],
+                "summary": "Evaluate one host for a month",
+                "description": "Refused if that host's month has already been evaluated — the frozen result does not move once decided.",
+                "operationId": "0a2fce5b067211f0240e0194d8d6a9af",
+                "parameters": [
+                    {
+                        "name": "host",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "period"
+                                ],
+                                "properties": {
+                                    "period": {
+                                        "type": "string",
+                                        "example": "2026-09"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "`BAD_REQUEST` — already evaluated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/settlements": {
             "get": {
                 "tags": [
@@ -3084,6 +3413,79 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/translate": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Draft-translate a name field into Hindi",
+                "description": "A convenience for the bilingual name fields across the catalogue screens (categories, gifts, levels, VIP tiers) — not the app's own i18n system. Best-effort: backed by an unauthenticated third-party translation API with no SLA, so a failure or empty result is reported as `translated: null` rather than an error — the field stays a normal editable input either way.",
+                "operationId": "5b13e57d6e402e46cdc296e5b7c65c07",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "text"
+                                ],
+                                "properties": {
+                                    "text": {
+                                        "type": "string",
+                                        "example": "Music",
+                                        "maxLength": 200
+                                    },
+                                    "target": {
+                                        "type": "string",
+                                        "default": "hi",
+                                        "enum": [
+                                            "hi"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "translated": {
+                                                    "type": "string",
+                                                    "example": "संगीत",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "meta": {
+                                            "$ref": "#/components/schemas/Meta"
+                                        }
+                                    },
+                                    "type": "object"
                                 }
                             }
                         }
@@ -7870,6 +8272,132 @@
                 ]
             }
         },
+        "/admin/ranking-rules/{rule}/rewards/{reward}": {
+            "delete": {
+                "tags": [
+                    "Rankings"
+                ],
+                "summary": "Remove a reward band",
+                "operationId": "436c6e7b7aadbff037f969f7570f5081",
+                "parameters": [
+                    {
+                        "name": "rule",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "reward",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Removed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Rankings"
+                ],
+                "summary": "Edit a reward band",
+                "description": "A band carries no capacity or claimed-count of its own — a payout copies its `reward_type`\nand `reward_value` onto its own row the moment it pays, so editing a band afterwards cannot\nretouch a payout that already happened.",
+                "operationId": "421dfc9196b59abae32003f4ceac6d81",
+                "parameters": [
+                    {
+                        "name": "rule",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "reward",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "rank_from": {
+                                        "type": "integer",
+                                        "minimum": 1
+                                    },
+                                    "rank_to": {
+                                        "type": "integer"
+                                    },
+                                    "reward_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "coins",
+                                            "diamonds"
+                                        ]
+                                    },
+                                    "reward_value": {
+                                        "type": "integer",
+                                        "minimum": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — overlapping ranks or inverted range",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/ranking-rules/{rule}/pay-rewards": {
             "post": {
                 "tags": [
@@ -10737,6 +11265,79 @@
                 ]
             }
         },
+        "/admin/rooms/{room}/seat-template": {
+            "patch": {
+                "tags": [
+                    "Rooms"
+                ],
+                "summary": "Assign or clear a room's seat template",
+                "description": "Applying a template bulk-writes its `vip_positions` onto the room's own seats right now — positions past the room's `seat_count` are ignored, not rejected, since a template may be sized for a different room. Clearing the template (`seat_template_id: null`) only unlinks it; it does **not** strip whatever VIP flags are already on the seats, since some may be manual overrides made afterward.",
+                "operationId": "7b6d8f3db7e33af50a9b2fdfb9228efb",
+                "parameters": [
+                    {
+                        "name": "room",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "seat_template_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Applied or cleared",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `rooms.seat_template_assign`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — unknown template id",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/rooms/{room}/seats/{seat}/lock": {
             "post": {
                 "tags": [
@@ -10789,6 +11390,90 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "`NOT_FOUND` — no such seat in this room",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/rooms/{room}/seats/{seat}/vip": {
+            "post": {
+                "tags": [
+                    "Rooms"
+                ],
+                "summary": "Mark or unmark one seat VIP",
+                "description": "Live, per-room state — independent of `room_seat_templates`, which is only a reusable set of defaults. Recorded in both `audit_logs` and `moderation_logs`.",
+                "operationId": "ace6ff5d06e63ab17fce8872530ba191",
+                "parameters": [
+                    {
+                        "name": "room",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "seat",
+                        "in": "path",
+                        "description": "Seat number, 1-based",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "vip"
+                                ],
+                                "properties": {
+                                    "vip": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `rooms.seat_vip`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
                                 }
                             }
                         }
@@ -11192,6 +11877,306 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/room-themes/background": {
+            "post": {
+                "tags": [
+                    "Room catalogue"
+                ],
+                "summary": "Upload a theme background image",
+                "description": "The image applied behind the live room screen once a host picks this theme. `id` is optional: creating a theme has none yet, so the panel just holds the returned URL until Save; editing one saves it onto the record immediately.",
+                "operationId": "dacff7d4b02cb05fb13610777722389f",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "id": {
+                                        "description": "An existing theme's id, to save immediately",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Uploaded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/room-themes/preview": {
+            "post": {
+                "tags": [
+                    "Room catalogue"
+                ],
+                "summary": "Upload a theme preview thumbnail",
+                "description": "The lightweight thumbnail shown in the theme-picker grid, separate from the full background image applied inside the room.",
+                "operationId": "b5cca0cbd3bafae46765aa6c51884911",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "id": {
+                                        "description": "An existing theme's id, to save immediately",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Uploaded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/room-seat-templates": {
+            "get": {
+                "tags": [
+                    "Room catalogue"
+                ],
+                "summary": "Seat layout templates",
+                "description": "Reusable \"N seats, these ones VIP\" layouts a future room-creation flow can offer instead of a free-typed number. A room's own `seat_count` is unaffected by this catalogue either way.",
+                "operationId": "b8577c4db6faa1fe3120a480a49d638a",
+                "parameters": [
+                    {
+                        "name": "include_inactive",
+                        "in": "query",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Room catalogue"
+                ],
+                "summary": "Create a seat template",
+                "operationId": "04b80ffa325ad77cf98260de48a9a89c",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name",
+                                    "total_seats"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "12 seats — 2 VIP"
+                                    },
+                                    "total_seats": {
+                                        "type": "integer",
+                                        "maximum": 50,
+                                        "minimum": 2
+                                    },
+                                    "vip_positions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer"
+                                        },
+                                        "example": [
+                                            1,
+                                            2
+                                        ]
+                                    },
+                                    "is_active": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — a position past the seat total, or repeated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/room-seat-templates/{template}": {
+            "delete": {
+                "tags": [
+                    "Room catalogue"
+                ],
+                "summary": "Delete a seat template",
+                "description": "No room references a template yet (no room-creation flow reads it), so unlike a category or theme there is no in-use guard here.",
+                "operationId": "faee5fc6b7ae658521c877f9fb4fe118",
+                "parameters": [
+                    {
+                        "name": "template",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Room catalogue"
+                ],
+                "summary": "Update a seat template",
+                "operationId": "ccdb35f6a7e6ec475dfc97f3626853c6",
+                "parameters": [
+                    {
+                        "name": "template",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
                                 }
                             }
                         }
@@ -11926,7 +12911,7 @@
                     "Store"
                 ],
                 "summary": "Upload a gift animation (GFT-057)",
-                "description": "Accepts Lottie, SVGA or MP4 up to **10 MB**. A larger file is rejected with a message naming the limit, as A.6a requires. Stored on the public disk for now; docs/07 swaps in DO Spaces by changing the disk name.",
+                "description": "Accepts Lottie, SVGA or MP4 up to **10 MB**. A larger file is rejected with a message naming the limit, as A.6a requires. Stored on the public disk for now; set `UPLOADS_DISK=vultr` to switch it to Vultr Object Storage.",
                 "operationId": "d954e0494c9bf46efce14965bb94d520",
                 "requestBody": {
                     "required": true,
@@ -11949,6 +12934,67 @@
                                             "svga",
                                             "mp4"
                                         ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Uploaded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — over the size cap, or a rejected type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/gifts/thumbnail": {
+            "post": {
+                "tags": [
+                    "Store"
+                ],
+                "summary": "Upload a gift thumbnail",
+                "description": "Accepts JPG/PNG/WEBP/GIF up to **5 MB**. Always returns a `url`. Pass `id` for an existing gift and the thumbnail is saved onto it in this same request — no separate PATCH needed. Omit `id` while creating a gift that has none yet; send the returned `url` back as `thumbnail_url` on the create call instead. Separate from `/admin/gifts/animation`, which is the moving artwork; this is the still image on the gift card.",
+                "operationId": "2c557921dcc31956af48dffcb3eed5b8",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "id": {
+                                        "description": "An existing gift's id, to save immediately",
+                                        "type": "integer",
+                                        "nullable": true
                                     }
                                 },
                                 "type": "object"
@@ -12110,6 +13156,325 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/gift-categories/icon": {
+            "post": {
+                "tags": [
+                    "Store"
+                ],
+                "summary": "Upload a gift category icon",
+                "description": "Accepts JPG/PNG/WEBP/GIF up to **5 MB**. Always returns a `url`. Pass `id` for an existing category and the icon is saved onto it in this same request — no separate PATCH needed. Omit `id` while creating a category that has none yet; send the returned `url` back as `icon_url` on the create call instead.",
+                "operationId": "5cd3ed4454173838df6e0e3106ef1db2",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "id": {
+                                        "description": "An existing category's id, to save immediately",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Uploaded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — over the size cap, or a rejected type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/levels": {
+            "get": {
+                "tags": [
+                    "Store"
+                ],
+                "summary": "Wealth/charm level ladder",
+                "description": "A user's actual level is never stored — it is resolved at read time against this ladder from `Wallet.lifetime_coins_spent` / `lifetime_diamonds_earned`, or from an admin override (see `POST /admin/users/{user}/level-override`). This endpoint is the ladder definition only.",
+                "operationId": "308482cd52ecda78ab22ab0ac8922c8e",
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "wealth",
+                                "charm"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "include_inactive",
+                        "in": "query",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `levels.view`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Store"
+                ],
+                "summary": "Create a level",
+                "description": "Thresholds must strictly increase with level number within a type — a level 4 asking for fewer coins than level 3 is refused rather than stored, since the ladder could no longer be resolved sensibly.",
+                "operationId": "bf015101bb0714c17f7e64b28f134716",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "type",
+                                    "level",
+                                    "name_en",
+                                    "threshold"
+                                ],
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "wealth",
+                                            "charm"
+                                        ]
+                                    },
+                                    "level": {
+                                        "description": "Unique within a type",
+                                        "type": "integer",
+                                        "minimum": 1
+                                    },
+                                    "name_en": {
+                                        "type": "string"
+                                    },
+                                    "name_hi": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "threshold": {
+                                        "description": "Coins spent (wealth) or diamonds earned (charm) to reach this level",
+                                        "type": "integer",
+                                        "minimum": 0
+                                    },
+                                    "badge_url": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "is_active": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`LEVEL_THRESHOLD_ORDER_INVALID` — thresholds would not rank users in level order",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/levels/{level}": {
+            "patch": {
+                "tags": [
+                    "Store"
+                ],
+                "summary": "Update a level",
+                "description": "A level's `type` cannot be changed — repointing it mid-ladder would silently orphan any wallet override that references it.",
+                "operationId": "c170f1bed0fbd017ab7ecd56f92dce02",
+                "parameters": [
+                    {
+                        "name": "level",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`LEVEL_THRESHOLD_ORDER_INVALID`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/levels/badge": {
+            "post": {
+                "tags": [
+                    "Store"
+                ],
+                "summary": "Upload a level badge image",
+                "description": "Accepts JPG/PNG/WEBP/GIF up to **5 MB**. Always returns a `url`. Pass `id` for an existing level and the badge is saved onto it in this same request — no separate PATCH needed. Omit `id` while creating a level that has none yet; send the returned `url` back as `badge_url` on the create call instead.",
+                "operationId": "886e44d09f9b434089f0a8d3edd09605",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "id": {
+                                        "description": "An existing level's id, to save immediately",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Uploaded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — over the size cap, or a rejected type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
                                 }
                             }
                         }
@@ -12367,128 +13732,12 @@
                 "tags": [
                     "VIP"
                 ],
-                "summary": "Frames, badges and entrance effects (A.6d)",
-                "description": "VIP gates are reported as a **level** rather than a raw tier id, because a level is what an operator recognises.",
+                "summary": "Badges (A.6d)",
+                "description": "Badges only — they are earned by the app (`is_auto_awarded`), not bought, so they never moved into `store_items`. Frames, bubbles, entry banners and entrance effects live at `/admin/store-items`.",
                 "operationId": "db14a09109a3c52242b4ec9dbce3f96b",
                 "responses": {
                     "200": {
                         "description": "OK",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Envelope"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/admin/cosmetics/frames": {
-            "post": {
-                "tags": [
-                    "VIP"
-                ],
-                "summary": "Create a frame",
-                "operationId": "198939d5a16577e6998ccf6359af384d",
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "required": [
-                                    "name"
-                                ],
-                                "properties": {
-                                    "name": {
-                                        "type": "string"
-                                    },
-                                    "image_url": {
-                                        "type": "string",
-                                        "nullable": true
-                                    },
-                                    "animation_url": {
-                                        "type": "string",
-                                        "nullable": true
-                                    },
-                                    "source": {
-                                        "type": "string",
-                                        "enum": [
-                                            "vip",
-                                            "event",
-                                            "purchase",
-                                            "admin"
-                                        ]
-                                    },
-                                    "coin_price": {
-                                        "type": "integer"
-                                    },
-                                    "required_vip_tier_id": {
-                                        "type": "integer",
-                                        "nullable": true
-                                    },
-                                    "is_active": {
-                                        "type": "boolean"
-                                    }
-                                },
-                                "type": "object"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Envelope"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/admin/cosmetics/frames/{frame}": {
-            "patch": {
-                "tags": [
-                    "VIP"
-                ],
-                "summary": "Update a frame",
-                "operationId": "615086d11fcf2ec882c86d6bbbbc6fe4",
-                "parameters": [
-                    {
-                        "name": "frame",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Updated",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -12569,39 +13818,104 @@
                 ]
             }
         },
-        "/admin/cosmetics/effects": {
+        "/admin/store-items": {
+            "get": {
+                "tags": [
+                    "VIP"
+                ],
+                "summary": "The Mall catalogue — frames, bubbles, entry banners, entrance effects",
+                "description": "One table discriminated by `type` rather than four near-identical ones. VIP gates are reported as a **level** rather than a raw tier id, because a level is what an operator recognises.",
+                "operationId": "1e015936e8a7eaa996d69c6655541d22",
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "frame",
+                                "bubble",
+                                "entry_banner",
+                                "entrance_effect"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "include_inactive",
+                        "in": "query",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
             "post": {
                 "tags": [
                     "VIP"
                 ],
-                "summary": "Create an entrance effect",
-                "operationId": "c53f694d6b1361bc6c1ca1a311056db4",
+                "summary": "Create a store item",
+                "operationId": "22d4603d3c4c600de2b7c03eddea5fc2",
                 "requestBody": {
                     "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
                                 "required": [
+                                    "type",
                                     "name"
                                 ],
                                 "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "frame",
+                                            "bubble",
+                                            "entry_banner",
+                                            "entrance_effect"
+                                        ]
+                                    },
                                     "name": {
                                         "type": "string"
+                                    },
+                                    "image_url": {
+                                        "type": "string",
+                                        "nullable": true
                                     },
                                     "animation_url": {
                                         "type": "string",
                                         "nullable": true
                                     },
                                     "animation_type": {
+                                        "description": "entrance_effect only",
                                         "type": "string",
                                         "nullable": true
                                     },
                                     "duration_ms": {
+                                        "description": "entrance_effect only",
                                         "type": "integer",
                                         "nullable": true
                                     },
                                     "trigger": {
+                                        "description": "entrance_effect only",
                                         "type": "string",
+                                        "nullable": true,
                                         "enum": [
                                             "vip_entry",
                                             "big_gift",
@@ -12609,13 +13923,36 @@
                                             "event"
                                         ]
                                     },
+                                    "min_gift_coin_value": {
+                                        "description": "entrance_effect only",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "source": {
+                                        "description": "frame only",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "vip",
+                                            "event",
+                                            "purchase",
+                                            "admin"
+                                        ]
+                                    },
+                                    "coin_price": {
+                                        "type": "integer"
+                                    },
+                                    "rental_days": {
+                                        "description": "Ownership expires this many days after purchase; null is a permanent, one-time buy.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
                                     "required_vip_tier_id": {
                                         "type": "integer",
                                         "nullable": true
                                     },
-                                    "min_gift_coin_value": {
-                                        "type": "integer",
-                                        "nullable": true
+                                    "is_active": {
+                                        "type": "boolean"
                                     }
                                 },
                                 "type": "object"
@@ -12626,6 +13963,136 @@
                 "responses": {
                     "201": {
                         "description": "Created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/store-items/{storeItem}": {
+            "delete": {
+                "tags": [
+                    "VIP"
+                ],
+                "summary": "Delete a store item",
+                "operationId": "c2a9a8c2e1e91ca7bfd2f84f6f697f55",
+                "parameters": [
+                    {
+                        "name": "storeItem",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "VIP"
+                ],
+                "summary": "Update a store item",
+                "operationId": "a1b7f26173dfc166b1afa81601a90d08",
+                "parameters": [
+                    {
+                        "name": "storeItem",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/store-items/image": {
+            "post": {
+                "tags": [
+                    "VIP"
+                ],
+                "summary": "Upload a store item image",
+                "description": "`id` is optional: creating an item has none yet, so the panel just holds the returned URL until Save. Editing one has an id, and passing it here saves the image immediately.",
+                "operationId": "096dda4b6bf76bb99c3d8f58094c9a4c",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "id": {
+                                        "description": "An existing item's id, to save immediately",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Uploaded",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -13676,6 +15143,290 @@
                 ]
             }
         },
+        "/admin/system/logs/laravel": {
+            "get": {
+                "tags": [
+                    "System"
+                ],
+                "summary": "Tail the Laravel debug log (IT Admin)",
+                "description": "Reads the last 2 MB of storage/logs/laravel.log from disk and parses it into entries. Behind `system.logs_view` and the `it_admin` role itself — Super Admin's blanket permission bypass does not reach this route.",
+                "operationId": "9375aac352f040e1a6ccad1d65c5e33a",
+                "parameters": [
+                    {
+                        "name": "level",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "EMERGENCY",
+                                "ALERT",
+                                "CRITICAL",
+                                "ERROR",
+                                "WARNING",
+                                "NOTICE",
+                                "INFO",
+                                "DEBUG"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "lines",
+                        "in": "query",
+                        "description": "Max entries returned, newest first",
+                        "schema": {
+                            "type": "integer",
+                            "default": 300,
+                            "maximum": 2000,
+                            "minimum": 10
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "entries": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "timestamp": {
+                                                                "type": "string",
+                                                                "example": "2026-09-04 10:15:23"
+                                                            },
+                                                            "level": {
+                                                                "type": "string",
+                                                                "example": "ERROR"
+                                                            },
+                                                            "message": {
+                                                                "type": "string"
+                                                            },
+                                                            "stack": {
+                                                                "type": "string",
+                                                                "nullable": true
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "truncated": {
+                                                    "description": "True when the file is bigger than the 2 MB tail window read",
+                                                    "type": "boolean"
+                                                },
+                                                "file_size": {
+                                                    "type": "integer"
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "meta": {
+                                            "$ref": "#/components/schemas/Meta"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `system.logs_view` and the `it_admin` role",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/system/logs/frontend": {
+            "get": {
+                "tags": [
+                    "System"
+                ],
+                "summary": "List reported frontend (admin-web) errors (IT Admin)",
+                "operationId": "54bdd20ccce68538cb372b8aa6d41810",
+                "parameters": [
+                    {
+                        "name": "level",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "error",
+                                "warning",
+                                "info"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "from",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "to",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 200,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `system.logs_view` and the `it_admin` role",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "System"
+                ],
+                "summary": "Report a browser error from the admin panel itself",
+                "description": "Self-service — no `system.logs_view` needed. The admin-web error boundary posts here so IT Admin can see what broke in someone else's browser; the reporter does not need to be able to read the list back.",
+                "operationId": "cc5319db585d1d17a3323212d72a2f59",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "message"
+                                ],
+                                "properties": {
+                                    "level": {
+                                        "type": "string",
+                                        "example": "error",
+                                        "enum": [
+                                            "error",
+                                            "warning",
+                                            "info"
+                                        ]
+                                    },
+                                    "message": {
+                                        "type": "string",
+                                        "example": "TypeError: Cannot read properties of undefined"
+                                    },
+                                    "stack": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "source_url": {
+                                        "type": "string",
+                                        "example": "/rooms/42",
+                                        "nullable": true
+                                    },
+                                    "meta": {
+                                        "type": "object",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Logged",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/users": {
             "get": {
                 "tags": [
@@ -14335,6 +16086,90 @@
                     },
                     "422": {
                         "description": "`VALIDATION_ERROR` — rejecting without a reason",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/users/{user}/level-override": {
+            "post": {
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Override a user's wealth or charm level (GFT-027)",
+                "description": "A user's level is normally derived from their wallet's lifetime coin/diamond totals against the level ladder (`GET /admin/levels`) — nothing is stored. This endpoint sets an explicit override that wins instead. Send `level_id: null` to clear it and return to the derived value. The VIP half of GFT-027 does not exist yet — there is no VIP subscription storage to override onto until the purchase flow (D.7a, mobile-app scope) lands.",
+                "operationId": "15c632d22bddb91b95dfe264c3132385",
+                "parameters": [
+                    {
+                        "name": "user",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "type"
+                                ],
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "wealth",
+                                            "charm"
+                                        ]
+                                    },
+                                    "level_id": {
+                                        "description": "Must belong to the given type. null clears the override",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Overridden or cleared",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `users.level_edit`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — `level_id` belongs to the wrong type",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -15661,7 +17496,7 @@
                         "type": "boolean"
                     },
                     "listener_count": {
-                        "description": "Denormalised from Redis; recent, not live",
+                        "description": "Live count of active room_members as of this request, not a push feed",
                         "type": "integer"
                     },
                     "peak_listeners": {
@@ -16483,6 +18318,10 @@
         {
             "name": "Dev Helpers",
             "description": "Local-environment conveniences. These routes do not exist outside APP_ENV=local"
+        },
+        {
+            "name": "System",
+            "description": "System"
         }
     ]
 }

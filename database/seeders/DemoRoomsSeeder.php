@@ -6,6 +6,7 @@ use App\Models\Room;
 use App\Models\RoomCategory;
 use App\Models\RoomMember;
 use App\Models\RoomSeat;
+use App\Models\RoomSeatTemplate;
 use App\Models\RoomTheme;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -59,6 +60,11 @@ class DemoRoomsSeeder extends Seeder
             return;
         }
 
+        // Grouped by size, so a room picks whichever seeded template matches its own
+        // seat count — the same thing RoomService::setSeatTemplate does, just inline
+        // here since the room doesn't exist yet for that endpoint to act on.
+        $templatesBySize = RoomSeatTemplate::query()->where('is_active', true)->get()->groupBy('total_seats');
+
         foreach (self::ROOMS as $index => [$name, $categoryKey, $status, $seats, $listeners, $featured]) {
             if (Room::query()->where('name', $name)->exists()) {
                 $this->command->warn("{$name} already exists — left alone.");
@@ -66,8 +72,14 @@ class DemoRoomsSeeder extends Seeder
                 continue;
             }
 
-            DB::transaction(function () use ($index, $name, $categoryKey, $status, $seats, $listeners, $featured, $owners, $categories, $themes) {
+            DB::transaction(function () use ($index, $name, $categoryKey, $status, $seats, $listeners, $featured, $owners, $categories, $themes, $templatesBySize) {
                 $ownerId = $owners[$index % count($owners)];
+
+                // Rotate through whichever templates match this seat count, so demo
+                // rooms of the same size don't all look identical.
+                $matches = $templatesBySize->get($seats, collect());
+                $template = $matches->isEmpty() ? null : $matches[$index % $matches->count()];
+                $vipPositions = $template?->vip_positions ?? [];
 
                 $room = Room::create([
                     'room_code'   => 'RM'.str_pad((string) (1000 + $index), 6, '0', STR_PAD_LEFT),
@@ -77,8 +89,9 @@ class DemoRoomsSeeder extends Seeder
                     'name'        => $name,
                     'description' => 'A demo room, seeded so the console has something to show.',
                     'visibility'  => 'public',
-                    'seat_count'  => $seats,
-                    'seat_layout' => $seats > 9 ? 'party' : 'classic',
+                    'seat_count'      => $seats,
+                    'seat_layout'     => $seats > 9 ? 'party' : 'classic',
+                    'seat_template_id' => $template?->id,
                     'status'      => $status,
                     'is_featured' => $featured,
                     // A window in the future, so the effective-featured logic is exercised.
@@ -92,7 +105,11 @@ class DemoRoomsSeeder extends Seeder
                 ]);
 
                 // Every room gets its full seat set; the first few are occupied on live ones.
+                // Seats cap who can be *seated* — how many more are simply in the room
+                // listening is a separate number, so the rest of the active users join too,
+                // without a seat, as `role = listener`.
                 $occupants = $status === Room::LIVE ? array_slice($owners, 0, min(4, count($owners))) : [];
+                $listenersOnly = $status === Room::LIVE ? array_slice($owners, count($occupants)) : [];
 
                 for ($seat = 1; $seat <= $seats; $seat++) {
                     $occupant = $occupants[$seat - 1] ?? null;
@@ -102,6 +119,10 @@ class DemoRoomsSeeder extends Seeder
                         'seat_number' => $seat,
                         'user_id'     => $occupant,
                         'is_locked'   => $seat === $seats && $status === Room::LIVE,
+                        // Whichever positions the assigned seat template decided are VIP
+                        // — never an independent guess. A room with no matching template
+                        // simply has no VIP seats yet, same as a real one would.
+                        'is_vip'      => in_array($seat, $vipPositions, true),
                         'occupied_at' => $occupant ? now()->subMinutes(random_int(1, 60)) : null,
                     ]);
                 }
@@ -111,6 +132,16 @@ class DemoRoomsSeeder extends Seeder
                         'room_id'   => $room->id,
                         'user_id'   => $userId,
                         'role'      => $position === 0 ? 'owner' : 'speaker',
+                        'joined_at' => now()->subMinutes(random_int(1, 120)),
+                        'is_active' => true,
+                    ]);
+                }
+
+                foreach ($listenersOnly as $userId) {
+                    RoomMember::create([
+                        'room_id'   => $room->id,
+                        'user_id'   => $userId,
+                        'role'      => 'listener',
                         'joined_at' => now()->subMinutes(random_int(1, 120)),
                         'is_active' => true,
                     ]);

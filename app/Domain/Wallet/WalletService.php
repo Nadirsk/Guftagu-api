@@ -173,6 +173,33 @@ class WalletService
     }
 
     /**
+     * GFT-027 — the level half. `$levelId` null clears the override and returns the user
+     * to whatever the wallet's own lifetime counters resolve to; the type check against
+     * `$levelId` happens in the controller, before this is called, since a mismatched
+     * type is a validation error, not a wallet-service concern.
+     */
+    public function setLevelOverride(User $user, string $type, ?int $levelId, AdminUser $actor): Wallet
+    {
+        $wallet = $this->forUser($user);
+        $column = $type === 'charm' ? 'charm_level_override_id' : 'wealth_level_override_id';
+        $before = $wallet->{$column};
+
+        $wallet->forceFill([$column => $levelId])->save();
+
+        $this->audit->log(
+            $actor,
+            'wallet.level_override',
+            'wallet',
+            User::class,
+            $user->id,
+            [$column => $before],
+            [$column => $levelId],
+        );
+
+        return $wallet->refresh();
+    }
+
+    /**
      * §15 rule 4 as a runnable check: walk a user's ledger and prove each row's
      * `balance_before` equals the previous `balance_after`, and that the last one equals
      * the wallet. The nightly reconciliation job is the real home for this; exposing it

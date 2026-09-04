@@ -117,7 +117,7 @@ MD,
 #[OA\Post(
     path: '/admin/gifts/animation',
     summary: 'Upload a gift animation (GFT-057)',
-    description: 'Accepts Lottie, SVGA or MP4 up to **10 MB**. A larger file is rejected with a message naming the limit, as A.6a requires. Stored on the public disk for now; docs/07 swaps in DO Spaces by changing the disk name.',
+    description: 'Accepts Lottie, SVGA or MP4 up to **10 MB**. A larger file is rejected with a message naming the limit, as A.6a requires. Stored on the public disk for now; set `UPLOADS_DISK=vultr` to switch it to Vultr Object Storage.',
     security: [['bearerAuth' => []]],
     tags: ['Store'],
     requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(
@@ -125,6 +125,24 @@ MD,
         schema: new OA\Schema(required: ['file', 'type'], properties: [
             new OA\Property(property: 'file', type: 'string', format: 'binary'),
             new OA\Property(property: 'type', type: 'string', enum: ['lottie', 'svga', 'mp4']),
+        ])
+    )),
+    responses: [
+        new OA\Response(response: 200, description: 'Uploaded', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — over the size cap, or a rejected type', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Post(
+    path: '/admin/gifts/thumbnail',
+    summary: 'Upload a gift thumbnail',
+    description: 'Accepts JPG/PNG/WEBP/GIF up to **5 MB**. Always returns a `url`. Pass `id` for an existing gift and the thumbnail is saved onto it in this same request — no separate PATCH needed. Omit `id` while creating a gift that has none yet; send the returned `url` back as `thumbnail_url` on the create call instead. Separate from `/admin/gifts/animation`, which is the moving artwork; this is the still image on the gift card.',
+    security: [['bearerAuth' => []]],
+    tags: ['Store'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(
+        mediaType: 'multipart/form-data',
+        schema: new OA\Schema(required: ['file'], properties: [
+            new OA\Property(property: 'file', type: 'string', format: 'binary'),
+            new OA\Property(property: 'id', type: 'integer', nullable: true, description: 'An existing gift\'s id, to save immediately'),
         ])
     )),
     responses: [
@@ -162,6 +180,93 @@ MD,
     parameters: [new OA\Parameter(name: 'category', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
     requestBody: new OA\RequestBody(content: new OA\JsonContent(type: 'object')),
     responses: [new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/gift-categories/icon',
+    summary: 'Upload a gift category icon',
+    description: 'Accepts JPG/PNG/WEBP/GIF up to **5 MB**. Always returns a `url`. Pass `id` for an existing category and the icon is saved onto it in this same request — no separate PATCH needed. Omit `id` while creating a category that has none yet; send the returned `url` back as `icon_url` on the create call instead.',
+    security: [['bearerAuth' => []]],
+    tags: ['Store'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(
+        mediaType: 'multipart/form-data',
+        schema: new OA\Schema(required: ['file'], properties: [
+            new OA\Property(property: 'file', type: 'string', format: 'binary'),
+            new OA\Property(property: 'id', type: 'integer', nullable: true, description: 'An existing category\'s id, to save immediately'),
+        ])
+    )),
+    responses: [
+        new OA\Response(response: 200, description: 'Uploaded', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — over the size cap, or a rejected type', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+
+// ------------------------------------------------------------------- Levels
+
+#[OA\Get(
+    path: '/admin/levels',
+    summary: 'Wealth/charm level ladder',
+    description: 'A user\'s actual level is never stored — it is resolved at read time against this ladder from `Wallet.lifetime_coins_spent` / `lifetime_diamonds_earned`, or from an admin override (see `POST /admin/users/{user}/level-override`). This endpoint is the ladder definition only.',
+    security: [['bearerAuth' => []]],
+    tags: ['Store'],
+    parameters: [
+        new OA\Parameter(name: 'type', in: 'query', schema: new OA\Schema(type: 'string', enum: ['wealth', 'charm'])),
+        new OA\Parameter(name: 'include_inactive', in: 'query', schema: new OA\Schema(type: 'boolean')),
+    ],
+    responses: [
+        new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `levels.view`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Post(
+    path: '/admin/levels',
+    summary: 'Create a level',
+    description: 'Thresholds must strictly increase with level number within a type — a level 4 asking for fewer coins than level 3 is refused rather than stored, since the ladder could no longer be resolved sensibly.',
+    security: [['bearerAuth' => []]],
+    tags: ['Store'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['type', 'level', 'name_en', 'threshold'], properties: [
+        new OA\Property(property: 'type', type: 'string', enum: ['wealth', 'charm']),
+        new OA\Property(property: 'level', type: 'integer', minimum: 1, description: 'Unique within a type'),
+        new OA\Property(property: 'name_en', type: 'string'),
+        new OA\Property(property: 'name_hi', type: 'string', nullable: true),
+        new OA\Property(property: 'threshold', type: 'integer', minimum: 0, description: 'Coins spent (wealth) or diamonds earned (charm) to reach this level'),
+        new OA\Property(property: 'badge_url', type: 'string', nullable: true),
+        new OA\Property(property: 'is_active', type: 'boolean'),
+    ])),
+    responses: [
+        new OA\Response(response: 201, description: 'Created', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`LEVEL_THRESHOLD_ORDER_INVALID` — thresholds would not rank users in level order', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Patch(
+    path: '/admin/levels/{level}',
+    summary: 'Update a level',
+    description: 'A level\'s `type` cannot be changed — repointing it mid-ladder would silently orphan any wallet override that references it.',
+    security: [['bearerAuth' => []]],
+    tags: ['Store'],
+    parameters: [new OA\Parameter(name: 'level', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(content: new OA\JsonContent(type: 'object')),
+    responses: [
+        new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`LEVEL_THRESHOLD_ORDER_INVALID`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Post(
+    path: '/admin/levels/badge',
+    summary: 'Upload a level badge image',
+    description: 'Accepts JPG/PNG/WEBP/GIF up to **5 MB**. Always returns a `url`. Pass `id` for an existing level and the badge is saved onto it in this same request — no separate PATCH needed. Omit `id` while creating a level that has none yet; send the returned `url` back as `badge_url` on the create call instead.',
+    security: [['bearerAuth' => []]],
+    tags: ['Store'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(
+        mediaType: 'multipart/form-data',
+        schema: new OA\Schema(required: ['file'], properties: [
+            new OA\Property(property: 'file', type: 'string', format: 'binary'),
+            new OA\Property(property: 'id', type: 'integer', nullable: true, description: 'An existing level\'s id, to save immediately'),
+        ])
+    )),
+    responses: [
+        new OA\Response(response: 200, description: 'Uploaded', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — over the size cap, or a rejected type', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
 )]
 
 // ---------------------------------------------------------------------- VIP
@@ -231,36 +336,11 @@ MD,
 )]
 #[OA\Get(
     path: '/admin/cosmetics',
-    summary: 'Frames, badges and entrance effects (A.6d)',
-    description: 'VIP gates are reported as a **level** rather than a raw tier id, because a level is what an operator recognises.',
+    summary: 'Badges (A.6d)',
+    description: 'Badges only — they are earned by the app (`is_auto_awarded`), not bought, so they never moved into `store_items`. Frames, bubbles, entry banners and entrance effects live at `/admin/store-items`.',
     security: [['bearerAuth' => []]],
     tags: ['VIP'],
     responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
-)]
-#[OA\Post(
-    path: '/admin/cosmetics/frames',
-    summary: 'Create a frame',
-    security: [['bearerAuth' => []]],
-    tags: ['VIP'],
-    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['name'], properties: [
-        new OA\Property(property: 'name', type: 'string'),
-        new OA\Property(property: 'image_url', type: 'string', nullable: true),
-        new OA\Property(property: 'animation_url', type: 'string', nullable: true),
-        new OA\Property(property: 'source', type: 'string', enum: ['vip', 'event', 'purchase', 'admin']),
-        new OA\Property(property: 'coin_price', type: 'integer'),
-        new OA\Property(property: 'required_vip_tier_id', type: 'integer', nullable: true),
-        new OA\Property(property: 'is_active', type: 'boolean'),
-    ])),
-    responses: [new OA\Response(response: 201, description: 'Created', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
-)]
-#[OA\Patch(
-    path: '/admin/cosmetics/frames/{frame}',
-    summary: 'Update a frame',
-    security: [['bearerAuth' => []]],
-    tags: ['VIP'],
-    parameters: [new OA\Parameter(name: 'frame', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
-    requestBody: new OA\RequestBody(content: new OA\JsonContent(type: 'object')),
-    responses: [new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
 )]
 #[OA\Post(
     path: '/admin/cosmetics/badges',
@@ -277,21 +357,71 @@ MD,
     ])),
     responses: [new OA\Response(response: 201, description: 'Created', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
 )]
-#[OA\Post(
-    path: '/admin/cosmetics/effects',
-    summary: 'Create an entrance effect',
+#[OA\Get(
+    path: '/admin/store-items',
+    summary: 'The Mall catalogue — frames, bubbles, entry banners, entrance effects',
+    description: 'One table discriminated by `type` rather than four near-identical ones. VIP gates are reported as a **level** rather than a raw tier id, because a level is what an operator recognises.',
     security: [['bearerAuth' => []]],
     tags: ['VIP'],
-    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['name'], properties: [
+    parameters: [
+        new OA\Parameter(name: 'type', in: 'query', schema: new OA\Schema(type: 'string', enum: ['frame', 'bubble', 'entry_banner', 'entrance_effect'])),
+        new OA\Parameter(name: 'include_inactive', in: 'query', schema: new OA\Schema(type: 'boolean')),
+    ],
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/store-items',
+    summary: 'Create a store item',
+    security: [['bearerAuth' => []]],
+    tags: ['VIP'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['type', 'name'], properties: [
+        new OA\Property(property: 'type', type: 'string', enum: ['frame', 'bubble', 'entry_banner', 'entrance_effect']),
         new OA\Property(property: 'name', type: 'string'),
+        new OA\Property(property: 'image_url', type: 'string', nullable: true),
         new OA\Property(property: 'animation_url', type: 'string', nullable: true),
-        new OA\Property(property: 'animation_type', type: 'string', nullable: true),
-        new OA\Property(property: 'duration_ms', type: 'integer', nullable: true),
-        new OA\Property(property: 'trigger', type: 'string', enum: ['vip_entry', 'big_gift', 'level_up', 'event']),
+        new OA\Property(property: 'animation_type', type: 'string', nullable: true, description: 'entrance_effect only'),
+        new OA\Property(property: 'duration_ms', type: 'integer', nullable: true, description: 'entrance_effect only'),
+        new OA\Property(property: 'trigger', type: 'string', nullable: true, enum: ['vip_entry', 'big_gift', 'level_up', 'event'], description: 'entrance_effect only'),
+        new OA\Property(property: 'min_gift_coin_value', type: 'integer', nullable: true, description: 'entrance_effect only'),
+        new OA\Property(property: 'source', type: 'string', nullable: true, enum: ['vip', 'event', 'purchase', 'admin'], description: 'frame only'),
+        new OA\Property(property: 'coin_price', type: 'integer'),
+        new OA\Property(property: 'rental_days', type: 'integer', nullable: true, description: 'Ownership expires this many days after purchase; null is a permanent, one-time buy.'),
         new OA\Property(property: 'required_vip_tier_id', type: 'integer', nullable: true),
-        new OA\Property(property: 'min_gift_coin_value', type: 'integer', nullable: true),
+        new OA\Property(property: 'is_active', type: 'boolean'),
     ])),
     responses: [new OA\Response(response: 201, description: 'Created', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Patch(
+    path: '/admin/store-items/{storeItem}',
+    summary: 'Update a store item',
+    security: [['bearerAuth' => []]],
+    tags: ['VIP'],
+    parameters: [new OA\Parameter(name: 'storeItem', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(content: new OA\JsonContent(type: 'object')),
+    responses: [new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Delete(
+    path: '/admin/store-items/{storeItem}',
+    summary: 'Delete a store item',
+    security: [['bearerAuth' => []]],
+    tags: ['VIP'],
+    parameters: [new OA\Parameter(name: 'storeItem', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    responses: [new OA\Response(response: 200, description: 'Deleted', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/store-items/image',
+    summary: 'Upload a store item image',
+    description: '`id` is optional: creating an item has none yet, so the panel just holds the returned URL until Save. Editing one has an id, and passing it here saves the image immediately.',
+    security: [['bearerAuth' => []]],
+    tags: ['VIP'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(
+        mediaType: 'multipart/form-data',
+        schema: new OA\Schema(required: ['file'], properties: [
+            new OA\Property(property: 'file', type: 'string', format: 'binary'),
+            new OA\Property(property: 'id', type: 'integer', nullable: true, description: 'An existing item\'s id, to save immediately'),
+        ])
+    )),
+    responses: [new OA\Response(response: 200, description: 'Uploaded', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
 )]
 class StorePaths
 {

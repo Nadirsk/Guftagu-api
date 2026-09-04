@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Domain\Audit\AuditLogger;
+use App\Domain\Media\ImageUploadService;
+use App\Domain\Rooms\RoomException;
 use App\Http\Controllers\Controller;
 use App\Models\RoomCategory;
+use App\Models\RoomSeatTemplate;
 use App\Models\RoomTheme;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -19,8 +22,12 @@ use Illuminate\Validation\Rule;
  */
 class RoomCatalogueController extends Controller
 {
-    public function __construct(protected AuditLogger $audit)
-    {
+    public const MAX_IMAGE_KB = 5120; // 5 MB, matching gifts' image cap
+
+    public function __construct(
+        protected AuditLogger $audit,
+        protected ImageUploadService $uploads,
+    ) {
     }
 
     // ------------------------------------------------------------- categories
@@ -167,6 +174,145 @@ class RoomCatalogueController extends Controller
         $theme->delete();
 
         return ApiResponse::success(null, 'Theme deleted');
+    }
+
+    /** Background image upload — same `id` behaviour as gifts' thumbnail upload (see GiftController). */
+    public function uploadThemeBackground(Request $request): JsonResponse
+    {
+        return $this->uploadThemeImage($request, 'background_url', 'room-theme-backgrounds');
+    }
+
+    /** Preview image upload — the thumbnail shown in the catalogue and theme picker. */
+    public function uploadThemePreview(Request $request): JsonResponse
+    {
+        return $this->uploadThemeImage($request, 'preview_url', 'room-theme-previews');
+    }
+
+    protected function uploadThemeImage(Request $request, string $column, string $folder): JsonResponse
+    {
+        $data = $request->validate([
+            'file' => [
+                'required', 'file', 'max:'.self::MAX_IMAGE_KB,
+                'mimes:jpg,jpeg,png,webp,gif',
+            ],
+            'id' => ['sometimes', 'nullable', 'integer', Rule::exists('room_themes', 'id')],
+        ], [
+            'file.max' => 'That image is larger than '.(self::MAX_IMAGE_KB / 1024).' MB.',
+        ]);
+
+        $result = $this->uploads->store($request->file('file'), $folder);
+
+        if (! empty($data['id'])) {
+            $theme = RoomTheme::findOrFail($data['id']);
+            $before = [$column => $theme->{$column}];
+
+            $theme->forceFill([$column => $result['url']])->save();
+
+            $this->audit->log($request->user(), 'room_theme.update', 'rooms', RoomTheme::class, $theme->id, $before, [$column => $result['url']]);
+        }
+
+        return ApiResponse::success($result, 'Image uploaded');
+    }
+
+    // ------------------------------------------------------------- seat templates
+
+    /**
+     * Reusable "N seats, these ones VIP" layouts. See the creating migration for why
+     * this is a catalogue rather than something typed per room — a room's own
+     * `seat_count` is unaffected either way, it just has ready-made options to offer.
+     */
+    public function seatTemplates(Request $request): JsonResponse
+    {
+        $templates = RoomSeatTemplate::query()
+            ->when(! $request->boolean('include_inactive'), fn ($q) => $q->where('is_active', true))
+            ->orderBy('total_seats')->orderBy('name')
+            ->get();
+
+        return ApiResponse::success($templates->map(fn (RoomSeatTemplate $t) => $this->seatTemplatePayload($t))->all());
+    }
+
+    public function storeSeatTemplate(Request $request): JsonResponse
+    {
+        $data = $this->validateSeatTemplate($request);
+        $this->assertPositionsFitTotal($data['total_seats'], $data['vip_positions'] ?? []);
+
+        $template = RoomSeatTemplate::create($data);
+
+        $this->audit->log($request->user(), 'room_seat_template.create', 'rooms', RoomSeatTemplate::class, $template->id, null, $data);
+
+        return ApiResponse::success($this->seatTemplatePayload($template), 'Seat template created', 201);
+    }
+
+    public function updateSeatTemplate(Request $request, RoomSeatTemplate $template): JsonResponse
+    {
+        $data = $this->validateSeatTemplate($request, false, $template);
+
+        // Shrinking total_seats without also resending vip_positions must not leave a
+        // stale position pointing past the new total.
+        $effectiveTotal = $data['total_seats'] ?? $template->total_seats;
+        $effectivePositions = $data['vip_positions'] ?? $template->vip_positions ?? [];
+        $this->assertPositionsFitTotal($effectiveTotal, $effectivePositions);
+
+        $before = $template->only(array_keys($data));
+        $template->fill($data)->save();
+
+        $this->audit->log($request->user(), 'room_seat_template.update', 'rooms', RoomSeatTemplate::class, $template->id, $before, $data);
+
+        return ApiResponse::success($this->seatTemplatePayload($template->fresh()), 'Seat template updated');
+    }
+
+    public function destroySeatTemplate(Request $request, RoomSeatTemplate $template): JsonResponse
+    {
+        // Nothing references a template yet (no room-creation flow reads it), so unlike a
+        // category or theme there is no "still in use" case to guard against here.
+        $this->audit->log($request->user(), 'room_seat_template.delete', 'rooms', RoomSeatTemplate::class, $template->id, ['name' => $template->name], null);
+
+        $template->delete();
+
+        return ApiResponse::success(null, 'Seat template deleted');
+    }
+
+    /** @return array<string, mixed> */
+    protected function validateSeatTemplate(Request $request, bool $creating = true, ?RoomSeatTemplate $template = null): array
+    {
+        $required = $creating ? 'required' : 'sometimes';
+        $totalSeats = $request->input('total_seats', $template?->total_seats);
+
+        return $request->validate([
+            'name'                => [$required, 'string', 'max:80'],
+            'total_seats'         => [$required, 'integer', 'min:2', 'max:50'],
+            'vip_positions'       => ['sometimes', 'nullable', 'array'],
+            'vip_positions.*'     => ['integer', 'min:1', 'max:'.($totalSeats ?? 50), 'distinct'],
+            'is_active'           => ['sometimes', 'boolean'],
+        ], [
+            'vip_positions.*.max' => 'A VIP position cannot be higher than the total seat count.',
+            'vip_positions.*.distinct' => 'The same seat position is listed more than once.',
+        ]);
+    }
+
+    /** @param int[] $positions */
+    protected function assertPositionsFitTotal(int $totalSeats, array $positions): void
+    {
+        foreach ($positions as $position) {
+            if ($position > $totalSeats) {
+                throw new RoomException(
+                    'VALIDATION_ERROR',
+                    "Position {$position} is past the {$totalSeats}-seat total.",
+                );
+            }
+        }
+    }
+
+    protected function seatTemplatePayload(RoomSeatTemplate $template): array
+    {
+        return [
+            'id'            => $template->id,
+            'name'          => $template->name,
+            'total_seats'   => $template->total_seats,
+            'vip_positions' => $template->vip_positions ?? [],
+            'vip_seats'     => $template->vipSeatCount(),
+            'is_active'     => $template->is_active,
+        ];
     }
 
     /** @return array<string, mixed> */

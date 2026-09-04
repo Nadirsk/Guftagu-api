@@ -49,8 +49,10 @@ class PermissionSeeder extends Seeder
             'feature'      => ['Feature a room', 'medium'],
             'pin'          => ['Pin a room', 'medium'],
             'categorise'   => ['Change room category', 'medium'],
+            'seat_template_assign' => ['Assign a room\'s seat template', 'medium'],
             'force_close'  => ['Force-close a room', 'high'],
             'seat_lock'    => ['Lock or unlock a seat', 'medium'],
+            'seat_vip'     => ['Mark or unmark a seat as VIP', 'medium'],
             'theme_manage' => ['Manage room themes', 'medium'],
         ],
         'moderation' => [
@@ -84,6 +86,10 @@ class PermissionSeeder extends Seeder
             'view'   => ['View VIP tiers', 'low'],
             'manage' => ['Manage VIP tiers', 'medium'],
         ],
+        'levels' => [
+            'view'   => ['View wealth/charm levels', 'low'],
+            'manage' => ['Manage wealth/charm levels', 'medium'],
+        ],
         'economy' => [
             'rates_manage'      => ['Manage conversion rates', 'high'],
             'packages_manage'   => ['Manage recharge packages', 'medium'],
@@ -111,6 +117,7 @@ class PermissionSeeder extends Seeder
             'view'          => ['View hosts', 'low'],
             'approve'       => ['Approve a host application', 'medium'],
             'target_manage' => ['Manage host targets', 'medium'],
+            'gift_target_manage' => ['Manage the monthly gift-target ladder and run evaluations', 'medium'],
             'earnings_view' => ['View host earnings', 'low'],
         ],
         'events' => [
@@ -157,6 +164,14 @@ class PermissionSeeder extends Seeder
         'settings' => [
             'view'   => ['View platform settings', 'low'],
             'manage' => ['Change platform settings', 'high'],
+        ],
+        // IT Admin's reason to exist: Laravel debug logs and reported frontend errors can
+        // carry stack traces, query fragments and request payloads, so this sits behind its
+        // own key rather than piggy-backing on `access.audit_view` (which is about who did
+        // what, not what broke). Deliberately excluded from the `admin` baseline in
+        // RoleSeeder — this is IT Admin / Super Admin territory, not general operations.
+        'system' => [
+            'logs_view' => ['View debug logs and frontend error reports', 'medium'],
         ],
     ];
 

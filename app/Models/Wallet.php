@@ -22,6 +22,7 @@ class Wallet extends Model
         'user_id', 'coin_balance', 'diamond_balance', 'frozen_coins', 'frozen_diamonds',
         'lifetime_coins_purchased', 'lifetime_coins_spent', 'lifetime_diamonds_earned',
         'lifetime_withdrawn_paise', 'is_frozen', 'version',
+        'wealth_level_override_id', 'charm_level_override_id',
     ];
 
     /**
@@ -72,6 +73,32 @@ class Wallet extends Model
     public function diamondTransactions(): HasMany
     {
         return $this->hasMany(DiamondTransaction::class);
+    }
+
+    public function wealthLevelOverride(): BelongsTo
+    {
+        return $this->belongsTo(WealthCharmLevel::class, 'wealth_level_override_id');
+    }
+
+    public function charmLevelOverride(): BelongsTo
+    {
+        return $this->belongsTo(WealthCharmLevel::class, 'charm_level_override_id');
+    }
+
+    /**
+     * GFT-027's override wins outright; otherwise the level is derived from the same
+     * lifetime counter the ladder is built against. Never null once at least one active
+     * level-1 threshold exists at 0 — a wallet with 0 lifetime spend still resolves to
+     * whatever level starts at 0, if the ladder defines one.
+     */
+    public function wealthLevel(): ?WealthCharmLevel
+    {
+        return $this->wealthLevelOverride ?? WealthCharmLevel::resolveFor('wealth', $this->lifetime_coins_spent);
+    }
+
+    public function charmLevel(): ?WealthCharmLevel
+    {
+        return $this->charmLevelOverride ?? WealthCharmLevel::resolveFor('charm', $this->lifetime_diamonds_earned);
     }
 
     public function balanceOf(string $currency): int

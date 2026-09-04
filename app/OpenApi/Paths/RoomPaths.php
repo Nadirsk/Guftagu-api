@@ -161,6 +161,22 @@ MD,
     ])),
     responses: [new OA\Response(response: 200, description: 'Category changed', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
 )]
+#[OA\Patch(
+    path: '/admin/rooms/{room}/seat-template',
+    summary: 'Assign or clear a room\'s seat template',
+    description: 'Applying a template bulk-writes its `vip_positions` onto the room\'s own seats right now — positions past the room\'s `seat_count` are ignored, not rejected, since a template may be sized for a different room. Clearing the template (`seat_template_id: null`) only unlinks it; it does **not** strip whatever VIP flags are already on the seats, since some may be manual overrides made afterward.',
+    security: [['bearerAuth' => []]],
+    tags: ['Rooms'],
+    parameters: [new OA\Parameter(name: 'room', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(properties: [
+        new OA\Property(property: 'seat_template_id', type: 'integer', nullable: true),
+    ])),
+    responses: [
+        new OA\Response(response: 200, description: 'Applied or cleared', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `rooms.seat_template_assign`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — unknown template id', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
 #[OA\Post(
     path: '/admin/rooms/{room}/seats/{seat}/lock',
     summary: 'Lock or unlock one seat (C.2b)',
@@ -176,6 +192,25 @@ MD,
     ])),
     responses: [
         new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 404, description: '`NOT_FOUND` — no such seat in this room', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Post(
+    path: '/admin/rooms/{room}/seats/{seat}/vip',
+    summary: 'Mark or unmark one seat VIP',
+    description: 'Live, per-room state — independent of `room_seat_templates`, which is only a reusable set of defaults. Recorded in both `audit_logs` and `moderation_logs`.',
+    security: [['bearerAuth' => []]],
+    tags: ['Rooms'],
+    parameters: [
+        new OA\Parameter(name: 'room', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        new OA\Parameter(name: 'seat', description: 'Seat number, 1-based', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+    ],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['vip'], properties: [
+        new OA\Property(property: 'vip', type: 'boolean'),
+    ])),
+    responses: [
+        new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `rooms.seat_vip`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
         new OA\Response(response: 404, description: '`NOT_FOUND` — no such seat in this room', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]
@@ -274,6 +309,82 @@ MD,
         new OA\Response(response: 200, description: 'Deleted', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
         new OA\Response(response: 400, description: '`BAD_REQUEST` — in use', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
+)]
+#[OA\Post(
+    path: '/admin/room-themes/background',
+    summary: 'Upload a theme background image',
+    description: 'The image applied behind the live room screen once a host picks this theme. `id` is optional: creating a theme has none yet, so the panel just holds the returned URL until Save; editing one saves it onto the record immediately.',
+    security: [['bearerAuth' => []]],
+    tags: ['Room catalogue'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(
+        mediaType: 'multipart/form-data',
+        schema: new OA\Schema(required: ['file'], properties: [
+            new OA\Property(property: 'file', type: 'string', format: 'binary'),
+            new OA\Property(property: 'id', type: 'integer', nullable: true, description: 'An existing theme\'s id, to save immediately'),
+        ])
+    )),
+    responses: [new OA\Response(response: 200, description: 'Uploaded', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/room-themes/preview',
+    summary: 'Upload a theme preview thumbnail',
+    description: 'The lightweight thumbnail shown in the theme-picker grid, separate from the full background image applied inside the room.',
+    security: [['bearerAuth' => []]],
+    tags: ['Room catalogue'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(
+        mediaType: 'multipart/form-data',
+        schema: new OA\Schema(required: ['file'], properties: [
+            new OA\Property(property: 'file', type: 'string', format: 'binary'),
+            new OA\Property(property: 'id', type: 'integer', nullable: true, description: 'An existing theme\'s id, to save immediately'),
+        ])
+    )),
+    responses: [new OA\Response(response: 200, description: 'Uploaded', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Get(
+    path: '/admin/room-seat-templates',
+    summary: 'Seat layout templates',
+    description: 'Reusable "N seats, these ones VIP" layouts a future room-creation flow can offer instead of a free-typed number. A room\'s own `seat_count` is unaffected by this catalogue either way.',
+    security: [['bearerAuth' => []]],
+    tags: ['Room catalogue'],
+    parameters: [new OA\Parameter(name: 'include_inactive', in: 'query', schema: new OA\Schema(type: 'boolean'))],
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/room-seat-templates',
+    summary: 'Create a seat template',
+    security: [['bearerAuth' => []]],
+    tags: ['Room catalogue'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['name', 'total_seats'], properties: [
+        new OA\Property(property: 'name', type: 'string', example: '12 seats — 2 VIP'),
+        new OA\Property(property: 'total_seats', type: 'integer', minimum: 2, maximum: 50),
+        new OA\Property(property: 'vip_positions', type: 'array', items: new OA\Items(type: 'integer'), example: [1, 2]),
+        new OA\Property(property: 'is_active', type: 'boolean'),
+    ])),
+    responses: [
+        new OA\Response(response: 201, description: 'Created', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — a position past the seat total, or repeated', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Patch(
+    path: '/admin/room-seat-templates/{template}',
+    summary: 'Update a seat template',
+    security: [['bearerAuth' => []]],
+    tags: ['Room catalogue'],
+    parameters: [new OA\Parameter(name: 'template', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(content: new OA\JsonContent(type: 'object')),
+    responses: [
+        new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Delete(
+    path: '/admin/room-seat-templates/{template}',
+    summary: 'Delete a seat template',
+    description: 'No room references a template yet (no room-creation flow reads it), so unlike a category or theme there is no in-use guard here.',
+    security: [['bearerAuth' => []]],
+    tags: ['Room catalogue'],
+    parameters: [new OA\Parameter(name: 'template', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    responses: [new OA\Response(response: 200, description: 'Deleted', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
 )]
 
 // -------------------------------------------------------- live enforcement

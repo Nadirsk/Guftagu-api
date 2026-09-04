@@ -24,7 +24,9 @@ class DatabaseSeeder extends Seeder
             VipTierSeeder::class,
             GiftCatalogueSeeder::class,
             RoomCatalogueSeeder::class,
+            RoomSeatTemplateSeeder::class,
             RankingRuleSeeder::class,
+            WealthCharmLevelSeeder::class,
             SuperAdminSeeder::class,
         ]);
     }

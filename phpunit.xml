@@ -30,5 +30,8 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <!-- Never let a test hit the real Vultr bucket, whatever .env's UPLOADS_DISK
+             says for actual traffic — Storage::fake('public') only fakes 'public'. -->
+        <env name="UPLOADS_DISK" value="public"/>
     </php>
 </phpunit>

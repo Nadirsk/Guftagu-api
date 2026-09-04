@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Domain\Audit\AuditLogger;
+use App\Domain\Media\ImageUploadService;
 use App\Domain\Store\GiftCatalogue;
 use App\Http\Controllers\Controller;
 use App\Models\Gift;
@@ -10,7 +11,6 @@ use App\Models\GiftCategory;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 /**
@@ -23,10 +23,12 @@ class GiftController extends Controller
 {
     /** A.6a — "a 60 MB animation is rejected with a clear size error". */
     public const MAX_ANIMATION_KB = 10240;   // 10 MB, matching docs/01 §6's image cap
+    public const MAX_IMAGE_KB = 5120;        // 5 MB — a thumbnail or icon, not an animation
 
     public function __construct(
         protected GiftCatalogue $catalogue,
         protected AuditLogger $audit,
+        protected ImageUploadService $uploads,
     ) {
     }
 
@@ -135,8 +137,9 @@ class GiftController extends Controller
     /**
      * GFT-057 — animation upload.
      *
-     * Without DO Spaces this writes to the public disk; docs/07 swaps the disk name in
-     * production. The validation is the part that matters either way.
+     * Writes through `ImageUploadService`, so it lands on the local `public` disk until
+     * `UPLOADS_DISK=vultr` is set (config/filesystems.php) — the validation is the part
+     * that matters either way.
      */
     public function uploadAnimation(Request $request): JsonResponse
     {
@@ -154,18 +157,85 @@ class GiftController extends Controller
             'file.max' => 'That file is larger than '.(self::MAX_ANIMATION_KB / 1024).' MB. Compress it or shorten the animation.',
         ]);
 
-        $file = $request->file('file');
-        $path = $file->store('gift-animations', 'public');
+        $result = $this->uploads->store($request->file('file'), 'gift-animations');
 
-        return ApiResponse::success([
-            'url'  => Storage::disk('public')->url($path),
-            'path' => $path,
-            'size' => $file->getSize(),
-            'type' => $request->input('type'),
-        ], 'Animation uploaded');
+        return ApiResponse::success(
+            [...$result, 'type' => $request->input('type')],
+            'Animation uploaded',
+        );
+    }
+
+    /** Thumbnail upload — the still image shown on the gift card, separate from the animation. */
+    /**
+     * `id` is optional: creating a gift has none yet, so the panel just holds the
+     * returned URL until Save. Editing one has an id, and passing it here saves the
+     * thumbnail immediately — one step instead of upload-then-remember-to-Save.
+     */
+    public function uploadThumbnail(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'file' => [
+                'required', 'file', 'max:'.self::MAX_IMAGE_KB,
+                'mimes:jpg,jpeg,png,webp,gif',
+            ],
+            'id' => ['sometimes', 'nullable', 'integer', Rule::exists('gifts', 'id')],
+        ], [
+            'file.max' => 'That image is larger than '.(self::MAX_IMAGE_KB / 1024).' MB.',
+        ]);
+
+        $result = $this->uploads->store($request->file('file'), 'gift-thumbnails');
+
+        if (! empty($data['id'])) {
+            $gift = Gift::findOrFail($data['id']);
+            $before = ['thumbnail_url' => $gift->thumbnail_url];
+
+            $gift->forceFill(['thumbnail_url' => $result['url']])->save();
+            $this->catalogue->flush();
+
+            $this->audit->log($request->user(), 'gift.update', 'gifts', Gift::class, $gift->id, $before, ['thumbnail_url' => $result['url']]);
+
+            $result['gift'] = $this->payload($gift->fresh());
+        }
+
+        return ApiResponse::success($result, 'Thumbnail uploaded');
     }
 
     // ------------------------------------------------------------- categories
+
+    /** Category icon upload — same `id` behaviour as {@see uploadThumbnail()}. */
+    public function uploadCategoryIcon(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'file' => [
+                'required', 'file', 'max:'.self::MAX_IMAGE_KB,
+                'mimes:jpg,jpeg,png,webp,gif',
+            ],
+            'id' => ['sometimes', 'nullable', 'integer', Rule::exists('gift_categories', 'id')],
+        ], [
+            'file.max' => 'That image is larger than '.(self::MAX_IMAGE_KB / 1024).' MB.',
+        ]);
+
+        $result = $this->uploads->store($request->file('file'), 'gift-category-icons');
+
+        if (! empty($data['id'])) {
+            $category = GiftCategory::findOrFail($data['id']);
+            $before = ['icon_url' => $category->icon_url];
+
+            $category->forceFill(['icon_url' => $result['url']])->save();
+            $this->catalogue->flush();
+
+            $this->audit->log($request->user(), 'gift_category.update', 'gifts', GiftCategory::class, $category->id, $before, ['icon_url' => $result['url']]);
+
+            $result['category'] = [
+                'id' => $category->id, 'key' => $category->key, 'name_en' => $category->name_en,
+                'name_hi' => $category->name_hi, 'icon_url' => $category->icon_url,
+                'sort_order' => $category->sort_order, 'is_active' => $category->is_active,
+                'gift_count' => $category->gifts()->count(),
+            ];
+        }
+
+        return ApiResponse::success($result, 'Icon uploaded');
+    }
 
     public function categories(Request $request): JsonResponse
     {
@@ -193,7 +263,7 @@ class GiftController extends Controller
             'key'        => ['required', 'string', 'max:50', 'regex:/^[a-z][a-z0-9_]*$/', Rule::unique('gift_categories', 'key')],
             'name_en'    => ['required', 'string', 'max:80'],
             'name_hi'    => ['sometimes', 'nullable', 'string', 'max:80'],
-            'icon_url'   => ['sometimes', 'nullable', 'url', 'max:500'],
+            'icon_url'   => ['sometimes', 'nullable', 'string', 'max:500'],
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:999'],
             'is_active'  => ['sometimes', 'boolean'],
         ]);
@@ -211,7 +281,7 @@ class GiftController extends Controller
         $data = $request->validate([
             'name_en'    => ['sometimes', 'string', 'max:80'],
             'name_hi'    => ['sometimes', 'nullable', 'string', 'max:80'],
-            'icon_url'   => ['sometimes', 'nullable', 'url', 'max:500'],
+            'icon_url'   => ['sometimes', 'nullable', 'string', 'max:500'],
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:999'],
             'is_active'  => ['sometimes', 'boolean'],
         ]);

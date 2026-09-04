@@ -211,6 +211,30 @@ MD,
     ]
 )]
 #[OA\Post(
+    path: '/admin/translate',
+    summary: 'Draft-translate a name field into Hindi',
+    description: 'A convenience for the bilingual name fields across the catalogue screens (categories, gifts, levels, VIP tiers) — not the app\'s own i18n system. Best-effort: backed by an unauthenticated third-party translation API with no SLA, so a failure or empty result is reported as `translated: null` rather than an error — the field stays a normal editable input either way.',
+    security: [['bearerAuth' => []]],
+    tags: ['Auth'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['text'], properties: [
+        new OA\Property(property: 'text', type: 'string', maxLength: 200, example: 'Music'),
+        new OA\Property(property: 'target', type: 'string', enum: ['hi'], default: 'hi'),
+    ])),
+    responses: [
+        new OA\Response(
+            response: 200,
+            description: 'OK',
+            content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'success', type: 'boolean', example: true),
+                new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'translated', type: 'string', nullable: true, example: 'संगीत'),
+                ]),
+                new OA\Property(property: 'meta', ref: '#/components/schemas/Meta'),
+            ])
+        ),
+    ]
+)]
+#[OA\Post(
     path: '/admin/auth/mfa/reauth',
     summary: 'Request an OTP to confirm a high-risk action (GFT-122)',
     description: 'Granting or denying a `high` risk_level permission needs fresh MFA. Call this, then `/admin/auth/mfa/reauth/verify`, then retry the grant within the confirmation window (5 minutes by default).',

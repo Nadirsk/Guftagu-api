@@ -307,6 +307,192 @@ class RoomManagementTest extends TestCase
             ->assertStatus(404);
     }
 
+    #[Test]
+    public function a_seat_can_be_marked_and_unmarked_vip_independently_of_occupancy(): void
+    {
+        $room = $this->makeRoom([], seats: 5);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base."/rooms/{$room->id}/seats/1/vip", ['vip' => true])
+            ->assertOk();
+
+        $seat = RoomSeat::where('room_id', $room->id)->where('seat_number', 1)->first();
+        $this->assertTrue($seat->is_vip);
+        $this->assertTrue(AuditLog::where('action', 'room.seat_vip')->exists());
+        $this->assertTrue(ModerationLog::where('action', 'room.seat_vip')->exists());
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base."/rooms/{$room->id}/seats/1/vip", ['vip' => false])
+            ->assertOk();
+
+        $this->assertFalse($seat->fresh()->is_vip);
+    }
+
+    #[Test]
+    public function a_vip_seat_toggle_needs_its_own_permission(): void
+    {
+        $moderator = $this->makeAdmin(Role::MODERATOR);
+        $room = $this->makeRoom([], seats: 5);
+
+        $this->actingAs($moderator, 'sanctum-admin')
+            ->postJson($this->base."/rooms/{$room->id}/seats/1/vip", ['vip' => true])
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'PERMISSION_DENIED');
+    }
+
+    #[Test]
+    public function marking_vip_on_a_seat_that_does_not_exist_is_a_404(): void
+    {
+        $room = $this->makeRoom([], seats: 5);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base."/rooms/{$room->id}/seats/99/vip", ['vip' => true])
+            ->assertStatus(404);
+    }
+
+    #[Test]
+    public function assigning_a_seat_template_applies_its_vip_positions_to_the_room(): void
+    {
+        $room = $this->makeRoom([], seats: 8);
+        $template = \App\Models\RoomSeatTemplate::create([
+            'name' => '8 seats — 2 VIP', 'total_seats' => 8, 'vip_positions' => [1, 2],
+        ]);
+
+        // Seat 3 starts VIP from an earlier manual toggle — applying the template must
+        // still turn it off, since the template is the new decided layout.
+        RoomSeat::where('room_id', $room->id)->where('seat_number', 3)->update(['is_vip' => true]);
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->patchJson($this->base."/rooms/{$room->id}/seat-template", ['seat_template_id' => $template->id])
+            ->assertOk();
+
+        $this->assertSame($template->id, $response->json('data.seat_template_id'));
+        $this->assertSame($template->id, $room->fresh()->seat_template_id);
+
+        $seats = RoomSeat::where('room_id', $room->id)->orderBy('seat_number')->pluck('is_vip', 'seat_number');
+        $this->assertTrue($seats[1]);
+        $this->assertTrue($seats[2]);
+        $this->assertFalse($seats[3], 'The template is the new decided layout — it must win over the stale manual mark.');
+        $this->assertFalse($seats[4]);
+
+        $this->assertTrue(AuditLog::where('action', 'room.seat_template_assign')->exists());
+    }
+
+    #[Test]
+    public function a_template_position_past_the_rooms_own_seat_count_is_ignored_not_rejected(): void
+    {
+        $room = $this->makeRoom([], seats: 5);
+        $template = \App\Models\RoomSeatTemplate::create([
+            'name' => '12 seats — 2 VIP', 'total_seats' => 12, 'vip_positions' => [1, 9],
+        ]);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->patchJson($this->base."/rooms/{$room->id}/seat-template", ['seat_template_id' => $template->id])
+            ->assertOk();
+
+        $this->assertTrue(RoomSeat::where('room_id', $room->id)->where('seat_number', 1)->value('is_vip'));
+        // Position 9 simply doesn't exist on a 5-seat room — nothing to update, no error.
+        $this->assertSame(5, RoomSeat::where('room_id', $room->id)->count());
+    }
+
+    #[Test]
+    public function clearing_a_seat_template_unlinks_it_without_touching_existing_vip_flags(): void
+    {
+        $room = $this->makeRoom([], seats: 5);
+        $template = \App\Models\RoomSeatTemplate::create([
+            'name' => 'Five with VIP at 1', 'total_seats' => 5, 'vip_positions' => [1],
+        ]);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->patchJson($this->base."/rooms/{$room->id}/seat-template", ['seat_template_id' => $template->id])
+            ->assertOk();
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->patchJson($this->base."/rooms/{$room->id}/seat-template", ['seat_template_id' => null])
+            ->assertOk();
+
+        $this->assertNull($response->json('data.seat_template_id'));
+        $this->assertNull($room->fresh()->seat_template_id);
+        $this->assertTrue(
+            RoomSeat::where('room_id', $room->id)->where('seat_number', 1)->value('is_vip'),
+            'Unlinking must not silently strip a VIP flag the template put there.',
+        );
+    }
+
+    #[Test]
+    public function assigning_an_unknown_seat_template_is_a_validation_error(): void
+    {
+        $room = $this->makeRoom([], seats: 5);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->patchJson($this->base."/rooms/{$room->id}/seat-template", ['seat_template_id' => 999999])
+            ->assertStatus(422);
+    }
+
+    #[Test]
+    public function assigning_a_seat_template_needs_its_own_permission(): void
+    {
+        $moderator = $this->makeAdmin(Role::MODERATOR);
+        $room = $this->makeRoom([], seats: 5);
+        $template = \App\Models\RoomSeatTemplate::create(['name' => 'X', 'total_seats' => 5]);
+
+        $this->actingAs($moderator, 'sanctum-admin')
+            ->patchJson($this->base."/rooms/{$room->id}/seat-template", ['seat_template_id' => $template->id])
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'PERMISSION_DENIED');
+    }
+
+    // -------------------------------------------------------- seat templates
+
+    #[Test]
+    public function a_seat_template_can_be_created_with_vip_positions(): void
+    {
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/room-seat-templates', [
+                'name' => '12 seats — 2 VIP', 'total_seats' => 12, 'vip_positions' => [1, 2],
+            ])
+            ->assertStatus(201);
+
+        $this->assertSame(2, $response->json('data.vip_seats'));
+        $this->assertTrue(AuditLog::where('action', 'room_seat_template.create')->exists());
+    }
+
+    #[Test]
+    public function a_vip_position_past_the_seat_total_is_rejected(): void
+    {
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/room-seat-templates', [
+                'name' => 'Broken', 'total_seats' => 8, 'vip_positions' => [1, 9],
+            ])
+            ->assertStatus(422);
+    }
+
+    #[Test]
+    public function shrinking_total_seats_below_a_stored_vip_position_is_refused(): void
+    {
+        $template = \App\Models\RoomSeatTemplate::create([
+            'name' => 'Ten with VIP at 9', 'total_seats' => 10, 'vip_positions' => [9],
+        ]);
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->patchJson($this->base."/room-seat-templates/{$template->id}", ['total_seats' => 5])
+            ->assertStatus(422);
+
+        $this->assertSame('VALIDATION_ERROR', $response->json('error.code'));
+        $this->assertSame(10, $template->fresh()->total_seats, 'The bad update must not have applied.');
+    }
+
+    #[Test]
+    public function a_seat_template_needs_theme_manage_to_write(): void
+    {
+        $manager = $this->makeAdmin(Role::MANAGER);
+
+        $this->actingAs($manager, 'sanctum-admin')
+            ->postJson($this->base.'/room-seat-templates', ['name' => 'X', 'total_seats' => 8])
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'PERMISSION_DENIED');
+    }
+
     // -------------------------------------------------------------------- A.4d
 
     #[Test]

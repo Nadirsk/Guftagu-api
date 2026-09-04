@@ -126,6 +126,113 @@ class StoreManagementTest extends TestCase
             ->assertJsonStructure(['data' => ['url', 'path', 'size']]);
     }
 
+    #[Test]
+    public function a_thumbnail_upload_returns_a_usable_url(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/gifts/thumbnail', [
+                'file' => UploadedFile::fake()->image('rose.png', 200, 200),
+            ])
+            ->assertOk()
+            ->assertJsonStructure(['data' => ['url', 'path', 'size']]);
+
+        Storage::disk('public')->assertExists($response->json('data.path'));
+    }
+
+    #[Test]
+    public function an_oversized_thumbnail_is_rejected(): void
+    {
+        Storage::fake('public');
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/gifts/thumbnail', [
+                'file' => UploadedFile::fake()->create('huge.png', 6000, 'image/png'),
+            ])
+            ->assertStatus(422);
+
+        $this->assertStringContainsString('larger than', $response->json('error.details.file.0'));
+    }
+
+    #[Test]
+    public function uploading_a_thumbnail_with_an_id_saves_it_onto_that_gift_immediately(): void
+    {
+        Storage::fake('public');
+
+        $gift = Gift::where('code', 'rose')->first();
+        $this->assertNull($gift->thumbnail_url);
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/gifts/thumbnail', [
+                'file' => UploadedFile::fake()->image('rose.png'),
+                'id'   => $gift->id,
+            ])
+            ->assertOk();
+
+        $url = $response->json('data.url');
+        $this->assertSame($url, $response->json('data.gift.thumbnail_url'));
+        $this->assertSame($url, $gift->fresh()->thumbnail_url);
+        $this->assertTrue(AuditLog::where('action', 'gift.update')->where('entity_id', $gift->id)->exists());
+    }
+
+    #[Test]
+    public function uploading_a_thumbnail_without_an_id_only_returns_the_url(): void
+    {
+        Storage::fake('public');
+
+        $gift = Gift::where('code', 'rose')->first();
+        $before = $gift->thumbnail_url;
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/gifts/thumbnail', ['file' => UploadedFile::fake()->image('rose.png')])
+            ->assertOk()
+            ->assertJsonMissingPath('data.gift');
+
+        $this->assertSame($before, $gift->fresh()->thumbnail_url, 'No id means nothing to save onto yet.');
+    }
+
+    #[Test]
+    public function uploading_a_thumbnail_with_an_unknown_id_is_a_validation_error(): void
+    {
+        Storage::fake('public');
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/gifts/thumbnail', [
+                'file' => UploadedFile::fake()->image('rose.png'),
+                'id'   => 999999,
+            ])
+            ->assertStatus(422);
+    }
+
+    #[Test]
+    public function a_category_can_be_created_and_edited_with_an_icon(): void
+    {
+        Storage::fake('public');
+
+        $icon = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/gift-categories/icon', [
+                'file' => UploadedFile::fake()->image('sparkle.png'),
+            ])
+            ->assertOk()
+            ->json('data.url');
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/gift-categories', [
+                'key' => 'seasonal', 'name_en' => 'Seasonal', 'icon_url' => $icon,
+            ])
+            ->assertStatus(201);
+
+        $category = GiftCategory::where('key', 'seasonal')->first();
+        $this->assertSame($icon, $category->icon_url);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->patchJson($this->base."/gift-categories/{$category->id}", ['is_active' => false])
+            ->assertOk();
+
+        $this->assertFalse($category->fresh()->is_active);
+    }
+
     // -------------------------------------------------------------------- A.6b
 
     #[Test]
@@ -347,15 +454,15 @@ class StoreManagementTest extends TestCase
         $tier = VipTier::where('level', 2)->first();
 
         $this->actingAs($this->superAdmin, 'sanctum-admin')
-            ->postJson($this->base.'/cosmetics/frames', [
-                'name' => 'Silver Halo', 'source' => 'vip', 'required_vip_tier_id' => $tier->id,
+            ->postJson($this->base.'/store-items', [
+                'type' => 'frame', 'name' => 'Silver Halo', 'source' => 'vip', 'required_vip_tier_id' => $tier->id,
             ])
             ->assertStatus(201);
 
         $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
-            ->getJson($this->base.'/cosmetics')->assertOk();
+            ->getJson($this->base.'/store-items?type=frame')->assertOk();
 
-        $frame = collect($response->json('data.frames'))->firstWhere('name', 'Silver Halo');
+        $frame = collect($response->json('data.items'))->firstWhere('name', 'Silver Halo');
 
         $this->assertSame(2, $frame['vip_level'], 'The gate is reported as a level, not a raw id.');
     }
@@ -364,8 +471,8 @@ class StoreManagementTest extends TestCase
     public function a_gate_pointing_at_a_tier_that_does_not_exist_is_rejected(): void
     {
         $this->actingAs($this->superAdmin, 'sanctum-admin')
-            ->postJson($this->base.'/cosmetics/frames', [
-                'name' => 'Ghost Frame', 'required_vip_tier_id' => 9999,
+            ->postJson($this->base.'/store-items', [
+                'type' => 'frame', 'name' => 'Ghost Frame', 'required_vip_tier_id' => 9999,
             ])
             ->assertStatus(422);
     }
@@ -409,7 +516,7 @@ class StoreManagementTest extends TestCase
     {
         $moderator = $this->makeAdmin(Role::MODERATOR);
 
-        foreach (['/gifts', '/gift-categories', '/vip-tiers', '/cosmetics'] as $path) {
+        foreach (['/gifts', '/gift-categories', '/vip-tiers', '/cosmetics', '/store-items', '/levels'] as $path) {
             $this->actingAs($moderator, 'sanctum-admin')
                 ->getJson($this->base.$path)
                 ->assertStatus(403)

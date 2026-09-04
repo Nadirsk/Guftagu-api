@@ -180,6 +180,23 @@ MD,
         new OA\Response(response: 422, description: '`VALIDATION_ERROR` — rejecting without a reason', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]
+#[OA\Post(
+    path: '/admin/users/{user}/level-override',
+    summary: 'Override a user\'s wealth or charm level (GFT-027)',
+    description: 'A user\'s level is normally derived from their wallet\'s lifetime coin/diamond totals against the level ladder (`GET /admin/levels`) — nothing is stored. This endpoint sets an explicit override that wins instead. Send `level_id: null` to clear it and return to the derived value. The VIP half of GFT-027 does not exist yet — there is no VIP subscription storage to override onto until the purchase flow (D.7a, mobile-app scope) lands.',
+    security: [['bearerAuth' => []]],
+    tags: ['Users'],
+    parameters: [new OA\Parameter(name: 'user', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['type'], properties: [
+        new OA\Property(property: 'type', type: 'string', enum: ['wealth', 'charm']),
+        new OA\Property(property: 'level_id', type: 'integer', nullable: true, description: 'Must belong to the given type. null clears the override'),
+    ])),
+    responses: [
+        new OA\Response(response: 200, description: 'Overridden or cleared', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `users.level_edit`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — `level_id` belongs to the wrong type', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
 
 // -------------------------------------------------------------------- wallet
 

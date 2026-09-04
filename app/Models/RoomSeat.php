@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class RoomSeat extends Model
 {
     protected $fillable = [
-        'room_id', 'seat_number', 'user_id', 'is_locked',
+        'room_id', 'seat_number', 'user_id', 'is_locked', 'is_vip',
         'is_muted_by_host', 'is_camera_on', 'occupied_at',
     ];
 
@@ -17,6 +17,7 @@ class RoomSeat extends Model
     {
         return [
             'is_locked'        => 'boolean',
+            'is_vip'           => 'boolean',
             'is_muted_by_host' => 'boolean',
             'is_camera_on'     => 'boolean',
             'occupied_at'      => 'datetime',

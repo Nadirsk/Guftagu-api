@@ -13,6 +13,8 @@ use App\Http\Controllers\Admin\BannedWordController;
 use App\Http\Controllers\Admin\ContentController;
 use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\Admin\GiftController;
+use App\Http\Controllers\Admin\GiftTargetController;
+use App\Http\Controllers\Admin\LevelController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\RankingController;
 use App\Http\Controllers\Admin\RoleController;
@@ -22,7 +24,10 @@ use App\Http\Controllers\Admin\HostController;
 use App\Http\Controllers\Admin\ReportCentreController;
 use App\Http\Controllers\Admin\RoomController;
 use App\Http\Controllers\Admin\SettlementController;
+use App\Http\Controllers\Admin\StoreItemController;
 use App\Http\Controllers\Admin\SupportController;
+use App\Http\Controllers\Admin\SystemLogController;
+use App\Http\Controllers\Admin\TranslateController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\UserWalletController;
 use App\Http\Controllers\Admin\VipTierController;
@@ -79,6 +84,12 @@ Route::prefix('v1')->group(function () {
                 ->middleware('throttle:admin-mfa')->name('auth.mfa.reauth');
             Route::post('auth/mfa/reauth/verify', [AdminAuthController::class, 'verifyReauth'])
                 ->middleware('throttle:admin-mfa')->name('auth.mfa.reauth.verify');
+
+            // A convenience for the bilingual name fields (categories, gifts, levels, VIP
+            // tiers) — not a translated-strings feature, just a starting draft the admin
+            // can correct. No permission key: any admin filling in a form may use it.
+            Route::post('translate', [TranslateController::class, 'translate'])
+                ->middleware('throttle:admin-translate')->name('translate');
 
             // ---- security policy (A.1c, A.1d)
             Route::middleware('permission:settings.manage')->group(function () {
@@ -158,8 +169,12 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:rooms.pin')->name('rooms.pin');
             Route::patch('rooms/{room}/category', [RoomController::class, 'categorise'])
                 ->middleware('permission:rooms.categorise')->name('rooms.categorise');
+            Route::patch('rooms/{room}/seat-template', [RoomController::class, 'setSeatTemplate'])
+                ->middleware('permission:rooms.seat_template_assign')->name('rooms.seat_template');
             Route::post('rooms/{room}/seats/{seat}/lock', [RoomController::class, 'lockSeat'])
                 ->middleware('permission:rooms.seat_lock')->name('rooms.seats.lock');
+            Route::post('rooms/{room}/seats/{seat}/vip', [RoomController::class, 'vipSeat'])
+                ->middleware('permission:rooms.seat_vip')->name('rooms.seats.vip');
 
             // ---- live-room enforcement (C.1b, C.2a–c)
             Route::post('rooms/{room}/silent-join', [RoomController::class, 'silentJoin'])
@@ -180,6 +195,8 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:rooms.view')->name('room-categories.index');
             Route::get('room-themes', [RoomCatalogueController::class, 'themes'])
                 ->middleware('permission:rooms.view')->name('room-themes.index');
+            Route::get('room-seat-templates', [RoomCatalogueController::class, 'seatTemplates'])
+                ->middleware('permission:rooms.view')->name('room-seat-templates.index');
 
             Route::middleware('permission:rooms.theme_manage')->group(function () {
                 Route::post('room-categories', [RoomCatalogueController::class, 'storeCategory'])->name('room-categories.store');
@@ -188,6 +205,11 @@ Route::prefix('v1')->group(function () {
                 Route::post('room-themes', [RoomCatalogueController::class, 'storeTheme'])->name('room-themes.store');
                 Route::patch('room-themes/{theme}', [RoomCatalogueController::class, 'updateTheme'])->name('room-themes.update');
                 Route::delete('room-themes/{theme}', [RoomCatalogueController::class, 'destroyTheme'])->name('room-themes.destroy');
+                Route::post('room-themes/background', [RoomCatalogueController::class, 'uploadThemeBackground'])->name('room-themes.background');
+                Route::post('room-themes/preview', [RoomCatalogueController::class, 'uploadThemePreview'])->name('room-themes.preview');
+                Route::post('room-seat-templates', [RoomCatalogueController::class, 'storeSeatTemplate'])->name('room-seat-templates.store');
+                Route::patch('room-seat-templates/{template}', [RoomCatalogueController::class, 'updateSeatTemplate'])->name('room-seat-templates.update');
+                Route::delete('room-seat-templates/{template}', [RoomCatalogueController::class, 'destroySeatTemplate'])->name('room-seat-templates.destroy');
             });
 
             // ---- gifts & store (epic A.6)
@@ -201,6 +223,7 @@ Route::prefix('v1')->group(function () {
                 Route::patch('gifts/{gift}', [GiftController::class, 'update'])->name('gifts.update');
                 Route::delete('gifts/{gift}', [GiftController::class, 'destroy'])->name('gifts.destroy');
                 Route::post('gifts/animation', [GiftController::class, 'uploadAnimation'])->name('gifts.animation');
+                Route::post('gifts/thumbnail', [GiftController::class, 'uploadThumbnail'])->name('gifts.thumbnail');
             });
 
             // Restocking a limited drop is its own key — pricing a gift and deciding how
@@ -211,11 +234,23 @@ Route::prefix('v1')->group(function () {
             Route::middleware('permission:gifts.category_manage')->group(function () {
                 Route::post('gift-categories', [GiftController::class, 'storeCategory'])->name('gift-categories.store');
                 Route::patch('gift-categories/{category}', [GiftController::class, 'updateCategory'])->name('gift-categories.update');
+                Route::post('gift-categories/icon', [GiftController::class, 'uploadCategoryIcon'])->name('gift-categories.icon');
+            });
+
+            // ---- wealth/charm levels — docs/00 §7, GFT-027's ladder
+            Route::get('levels', [LevelController::class, 'index'])
+                ->middleware('permission:levels.view')->name('levels.index');
+            Route::middleware('permission:levels.manage')->group(function () {
+                Route::post('levels', [LevelController::class, 'store'])->name('levels.store');
+                Route::patch('levels/{level}', [LevelController::class, 'update'])->name('levels.update');
+                Route::post('levels/badge', [LevelController::class, 'uploadBadge'])->name('levels.badge');
             });
 
             // ---- VIP & cosmetics (A.6c, A.6d)
             Route::get('vip-tiers', [VipTierController::class, 'index'])
                 ->middleware('permission:vip.view')->name('vip-tiers.index');
+            // Badges only now — frames/bubbles/entry banners/entrance effects moved to
+            // store-items below, since they are purchasable catalogue items, not earned ones.
             Route::get('cosmetics', [VipTierController::class, 'cosmetics'])
                 ->middleware('permission:vip.view')->name('cosmetics.index');
 
@@ -223,10 +258,20 @@ Route::prefix('v1')->group(function () {
                 Route::post('vip-tiers', [VipTierController::class, 'store'])->name('vip-tiers.store');
                 Route::patch('vip-tiers/{tier}', [VipTierController::class, 'update'])->name('vip-tiers.update');
                 Route::delete('vip-tiers/{tier}', [VipTierController::class, 'destroy'])->name('vip-tiers.destroy');
-                Route::post('cosmetics/frames', [VipTierController::class, 'storeFrame'])->name('cosmetics.frames.store');
-                Route::patch('cosmetics/frames/{frame}', [VipTierController::class, 'updateFrame'])->name('cosmetics.frames.update');
                 Route::post('cosmetics/badges', [VipTierController::class, 'storeBadge'])->name('cosmetics.badges.store');
-                Route::post('cosmetics/effects', [VipTierController::class, 'storeEffect'])->name('cosmetics.effects.store');
+            });
+
+            // ---- store items — the app's "Mall": frames, bubbles, entry banners, entrance
+            // effects. Reuses the vip.* permissions since these were vip.manage-gated
+            // already as frames/effects, before the store_items unification.
+            Route::get('store-items', [StoreItemController::class, 'index'])
+                ->middleware('permission:vip.view')->name('store-items.index');
+
+            Route::middleware('permission:vip.manage')->group(function () {
+                Route::post('store-items', [StoreItemController::class, 'store'])->name('store-items.store');
+                Route::patch('store-items/{storeItem}', [StoreItemController::class, 'update'])->name('store-items.update');
+                Route::delete('store-items/{storeItem}', [StoreItemController::class, 'destroy'])->name('store-items.destroy');
+                Route::post('store-items/image', [StoreItemController::class, 'uploadImage'])->name('store-items.image');
             });
 
             // ---- economy (epic A.7)
@@ -318,6 +363,8 @@ Route::prefix('v1')->group(function () {
                 Route::patch('ranking-rules/{rule}', [RankingController::class, 'update'])->name('rankings.update');
                 Route::post('ranking-rules/{rule}/snapshot', [RankingController::class, 'snapshot'])->name('rankings.snapshot');
                 Route::post('ranking-rules/{rule}/rewards', [RankingController::class, 'addReward'])->name('rankings.rewards.store');
+                Route::patch('ranking-rules/{rule}/rewards/{reward}', [RankingController::class, 'updateReward'])->name('rankings.rewards.update');
+                Route::delete('ranking-rules/{rule}/rewards/{reward}', [RankingController::class, 'removeReward'])->name('rankings.rewards.destroy');
             });
 
             Route::post('ranking-rules/{rule}/pay-rewards', [RankingController::class, 'payRewards'])
@@ -342,6 +389,8 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:users.ban')->name('users.unban');
             Route::post('users/{user}/kyc/verify', [UserController::class, 'reviewKyc'])
                 ->middleware('permission:users.kyc_verify')->name('users.kyc.verify');
+            Route::post('users/{user}/level-override', [UserController::class, 'overrideLevel'])
+                ->middleware('permission:users.level_edit')->name('users.level_override');
 
             // ---- wallet (A.3d)
             Route::get('users/{user}/wallet', [UserWalletController::class, 'show'])
@@ -458,6 +507,23 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:hosts.target_manage')->name('hosts.targets.evaluate');
             Route::delete('hosts/targets/{target}', [HostController::class, 'cancelTarget'])
                 ->middleware('permission:hosts.target_manage')->name('hosts.targets.cancel');
+
+            // ---- monthly gift-target ladder (mehfil's "Policies", separate from the above)
+            Route::get('gift-target-policies', [GiftTargetController::class, 'index'])
+                ->middleware('permission:hosts.gift_target_manage')->name('gift-target-policies.index');
+            Route::post('gift-target-policies', [GiftTargetController::class, 'store'])
+                ->middleware('permission:hosts.gift_target_manage')->name('gift-target-policies.store');
+            Route::patch('gift-target-policies/{policy}', [GiftTargetController::class, 'update'])
+                ->middleware('permission:hosts.gift_target_manage')->name('gift-target-policies.update');
+            // Static before {host} again, for the same reason as hosts/targets above.
+            Route::get('hosts/gift-targets', [GiftTargetController::class, 'results'])
+                ->middleware('permission:hosts.gift_target_manage')->name('hosts.gift-targets.index');
+            Route::get('hosts/gift-targets/tracker', [GiftTargetController::class, 'tracker'])
+                ->middleware('permission:hosts.gift_target_manage')->name('hosts.gift-targets.tracker');
+            Route::post('hosts/gift-targets/evaluate-all', [GiftTargetController::class, 'evaluateAll'])
+                ->middleware('permission:hosts.gift_target_manage')->name('hosts.gift-targets.evaluate-all');
+            Route::post('hosts/{host}/gift-targets/evaluate', [GiftTargetController::class, 'evaluateHost'])
+                ->middleware('permission:hosts.gift_target_manage')->name('hosts.gift-targets.evaluate');
 
             Route::get('hosts/{host}', [HostController::class, 'show'])
                 ->middleware('permission:hosts.view')->name('hosts.show');
@@ -590,6 +656,19 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:access.audit_view')->name('audit.entity');
             Route::get('audit-logs/{log}', [AuditLogController::class, 'show'])
                 ->middleware('permission:access.audit_view')->name('audit.show');
+
+            // ---- system logs — IT Admin login only. Deliberately gated by role identity
+            // (`role:it_admin`) rather than the permission system alone: Super Admin's
+            // blanket permission bypass and any direct grant of `system.logs_view` must
+            // NOT be enough to see this screen, only actually being IT Admin.
+            Route::get('system/logs/laravel', [SystemLogController::class, 'laravelLog'])
+                ->middleware(['permission:system.logs_view', 'role:it_admin'])->name('system.logs.laravel');
+            Route::get('system/logs/frontend', [SystemLogController::class, 'frontendIndex'])
+                ->middleware(['permission:system.logs_view', 'role:it_admin'])->name('system.logs.frontend.index');
+            // Self-service: any authenticated admin may report their own browser error,
+            // whether or not they can see the collected list back.
+            Route::post('system/logs/frontend', [SystemLogController::class, 'frontendStore'])
+                ->name('system.logs.frontend.store');
 
             // ---- support inbox (epic B.4)
             Route::get('support', [SupportController::class, 'index'])

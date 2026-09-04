@@ -28,8 +28,8 @@ use Illuminate\Support\Facades\Storage;
  *    for the same reason a half-written file must not be retried into a half-written file.
  *    A failure is reported on the row, and the operator runs it again.
  *
- * Files land on the local disk. docs/07 puts them in Spaces with a signed URL in
- * production — the only change there is the disk name.
+ * Files land on the local disk. docs/07 puts them on Vultr Object Storage with a signed
+ * URL in production — the only change there is the disk name.
  */
 class BuildReportExport implements ShouldQueue
 {

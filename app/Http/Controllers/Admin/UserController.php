@@ -8,6 +8,7 @@ use App\Domain\Wallet\WalletService;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UserKyc;
+use App\Models\WealthCharmLevel;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -110,6 +111,10 @@ class UserController extends Controller
                 'lifetime_coins_spent'     => $wallet->lifetime_coins_spent,
                 'lifetime_diamonds_earned' => $wallet->lifetime_diamonds_earned,
                 'is_frozen'                => $wallet->is_frozen,
+                // Derived from the ladder against the counters above, unless GFT-027
+                // overrode it — never a stored, independently-driftable field.
+                'wealth_level' => $this->levelPayload($wallet->wealthLevel(), $wallet->wealth_level_override_id !== null),
+                'charm_level'  => $this->levelPayload($wallet->charmLevel(), $wallet->charm_level_override_id !== null),
             ],
             'kyc' => $user->kyc === null ? null : [
                 'id'               => $user->kyc->id,
@@ -291,6 +296,32 @@ class UserController extends Controller
         );
     }
 
+    /**
+     * POST /admin/users/{user}/level-override — GFT-027, the level half. Sending a null
+     * `level_id` clears the override, which returns the user to whatever their wallet's
+     * lifetime counters resolve to on the current ladder.
+     */
+    public function overrideLevel(Request $request, User $user): JsonResponse
+    {
+        $data = $request->validate([
+            'type'     => ['required', Rule::in(WealthCharmLevel::TYPES)],
+            'level_id' => ['nullable', 'integer', Rule::exists('wealth_charm_levels', 'id')->where('type', $request->input('type'))],
+        ]);
+
+        $levelId = $data['level_id'] ?? null;
+        $wallet = $this->wallets->setLevelOverride($user, $data['type'], $levelId, $request->user());
+
+        $level = $data['type'] === 'charm' ? $wallet->charmLevel() : $wallet->wealthLevel();
+        $isOverride = $data['type'] === 'charm'
+            ? $wallet->charm_level_override_id !== null
+            : $wallet->wealth_level_override_id !== null;
+
+        return ApiResponse::success(
+            $this->levelPayload($level, $isOverride),
+            $levelId === null ? 'Override cleared — level is derived again' : 'Level overridden',
+        );
+    }
+
     // ----------------------------------------------------------------- internals
 
     protected function parseSort(string $sort): array
@@ -307,7 +338,7 @@ class UserController extends Controller
 
     /**
      * Masked by default, always. `users.view_pii` does not widen this payload — it has its
-     * own endpoint, so the audit trail cannot be sidestepped by loading a list.
+     * own endpoint, so seeing a real phone number is always a deliberate, recorded act.
      */
     protected function rowPayload(User $user): array
     {
@@ -332,6 +363,17 @@ class UserController extends Controller
             'wallet_frozen'  => (bool) ($user->wallet?->is_frozen ?? false),
             'last_active_at' => $user->last_active_at?->toIso8601ZuluString(),
             'created_at'     => $user->created_at?->toIso8601ZuluString(),
+        ];
+    }
+
+    protected function levelPayload(?WealthCharmLevel $level, bool $isOverride): array
+    {
+        return [
+            'id'          => $level?->id,
+            'level'       => $level?->level,
+            'name_en'     => $level?->name_en,
+            'badge_url'   => $level?->badge_url,
+            'is_override' => $isOverride,
         ];
     }
 }

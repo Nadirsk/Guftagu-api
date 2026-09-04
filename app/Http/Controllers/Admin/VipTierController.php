@@ -6,8 +6,6 @@ use App\Domain\Audit\AuditLogger;
 use App\Domain\Store\GiftCatalogue;
 use App\Http\Controllers\Controller;
 use App\Models\Badge;
-use App\Models\EntranceEffect;
-use App\Models\Frame;
 use App\Models\VipTier;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -87,22 +85,14 @@ class VipTierController extends Controller
         return ApiResponse::success(null, 'Tier deactivated — anything pointing at it keeps working');
     }
 
-    // ------------------------------------------------------------- cosmetics
+    // ---------------------------------------------------------------- badges
+    // Frames, bubbles, entry banners and entrance effects moved to StoreItemController —
+    // they are purchasable catalogue items now (see the store_items migration). Badges stay
+    // here: they are earned by the app, not bought, so they never fit that shape.
 
     public function cosmetics(Request $request): JsonResponse
     {
         return ApiResponse::success([
-            'frames' => Frame::query()->with('requiredVipTier:id,level')->orderBy('name')->get()
-                ->map(fn (Frame $f) => [
-                    'id'            => $f->id,
-                    'name'          => $f->name,
-                    'image_url'     => $f->image_url,
-                    'animation_url' => $f->animation_url,
-                    'source'        => $f->source,
-                    'coin_price'    => $f->coin_price,
-                    'vip_level'     => $f->requiredVipTier?->level,
-                    'is_active'     => $f->is_active,
-                ]),
             'badges' => Badge::query()->orderBy('name_en')->get()
                 ->map(fn (Badge $b) => [
                     'id'              => $b->id,
@@ -114,60 +104,7 @@ class VipTierController extends Controller
                     'is_auto_awarded' => $b->is_auto_awarded,
                     'is_active'       => $b->is_active,
                 ]),
-            'entrance_effects' => EntranceEffect::query()->with('requiredVipTier:id,level')->orderBy('name')->get()
-                ->map(fn (EntranceEffect $e) => [
-                    'id'                  => $e->id,
-                    'name'                => $e->name,
-                    'animation_url'       => $e->animation_url,
-                    'animation_type'      => $e->animation_type,
-                    'duration_ms'         => $e->duration_ms,
-                    'trigger'             => $e->trigger,
-                    'vip_level'           => $e->requiredVipTier?->level,
-                    'min_gift_coin_value' => $e->min_gift_coin_value,
-                    'is_active'           => $e->is_active,
-                ]),
-            'triggers' => EntranceEffect::TRIGGERS,
-            'sources'  => Frame::SOURCES,
         ]);
-    }
-
-    public function storeFrame(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'name'                 => ['required', 'string', 'max:80'],
-            'image_url'            => ['sometimes', 'nullable', 'string', 'max:500'],
-            'animation_url'        => ['sometimes', 'nullable', 'string', 'max:500'],
-            'source'               => ['sometimes', Rule::in(Frame::SOURCES)],
-            'coin_price'           => ['sometimes', 'integer', 'min:0', 'max:100000000'],
-            'required_vip_tier_id' => ['sometimes', 'nullable', 'integer', Rule::exists('vip_tiers', 'id')],
-            'is_active'            => ['sometimes', 'boolean'],
-        ]);
-
-        $frame = Frame::create($data);
-
-        $this->audit->log($request->user(), 'frame.create', 'vip', Frame::class, $frame->id, null, $data);
-
-        return ApiResponse::success(['id' => $frame->id], 'Frame created', 201);
-    }
-
-    public function updateFrame(Request $request, Frame $frame): JsonResponse
-    {
-        $data = $request->validate([
-            'name'                 => ['sometimes', 'string', 'max:80'],
-            'image_url'            => ['sometimes', 'nullable', 'string', 'max:500'],
-            'animation_url'        => ['sometimes', 'nullable', 'string', 'max:500'],
-            'source'               => ['sometimes', Rule::in(Frame::SOURCES)],
-            'coin_price'           => ['sometimes', 'integer', 'min:0', 'max:100000000'],
-            'required_vip_tier_id' => ['sometimes', 'nullable', 'integer', Rule::exists('vip_tiers', 'id')],
-            'is_active'            => ['sometimes', 'boolean'],
-        ]);
-
-        $before = $frame->only(array_keys($data));
-        $frame->fill($data)->save();
-
-        $this->audit->log($request->user(), 'frame.update', 'vip', Frame::class, $frame->id, $before, $data);
-
-        return ApiResponse::success(null, 'Frame updated');
     }
 
     public function storeBadge(Request $request): JsonResponse
@@ -187,26 +124,6 @@ class VipTierController extends Controller
         $this->audit->log($request->user(), 'badge.create', 'vip', Badge::class, $badge->id, null, $data);
 
         return ApiResponse::success(['id' => $badge->id], 'Badge created', 201);
-    }
-
-    public function storeEffect(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'name'                 => ['required', 'string', 'max:80'],
-            'animation_url'        => ['sometimes', 'nullable', 'string', 'max:500'],
-            'animation_type'       => ['sometimes', 'nullable', 'string', 'max:10'],
-            'duration_ms'          => ['sometimes', 'nullable', 'integer', 'min:0', 'max:60000'],
-            'trigger'              => ['sometimes', Rule::in(EntranceEffect::TRIGGERS)],
-            'required_vip_tier_id' => ['sometimes', 'nullable', 'integer', Rule::exists('vip_tiers', 'id')],
-            'min_gift_coin_value'  => ['sometimes', 'nullable', 'integer', 'min:0'],
-            'is_active'            => ['sometimes', 'boolean'],
-        ]);
-
-        $effect = EntranceEffect::create($data);
-
-        $this->audit->log($request->user(), 'entrance_effect.create', 'vip', EntranceEffect::class, $effect->id, null, $data);
-
-        return ApiResponse::success(['id' => $effect->id], 'Entrance effect created', 201);
     }
 
     // ----------------------------------------------------------------- shared

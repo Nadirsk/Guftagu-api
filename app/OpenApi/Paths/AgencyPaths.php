@@ -350,6 +350,94 @@ MD,
     parameters: [new OA\Parameter(name: 'target', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
     responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
 )]
+
+// ------------------------------------------------ monthly gift-target ladder
+
+#[OA\Get(
+    path: '/admin/gift-target-policies',
+    summary: 'The monthly gift-target ladder',
+    description: 'mehfil\'s "Policies" screen, ported. Separate from `/admin/hosts/targets` above — that is a bespoke per-host target an admin sets, paying only the host a percentage of their diamond earnings; this is a shared ladder any host qualifies into automatically each calendar month by clearing a flat coins-sent + minutes-live threshold, paying both the host and their agency a flat amount.',
+    security: [['bearerAuth' => []]],
+    tags: ['Hosts'],
+    parameters: [new OA\Parameter(name: 'include_inactive', in: 'query', schema: new OA\Schema(type: 'boolean'))],
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/gift-target-policies',
+    summary: 'Add a rung to the ladder',
+    security: [['bearerAuth' => []]],
+    tags: ['Hosts'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['time_minutes', 'target_coins'], properties: [
+        new OA\Property(property: 'time_minutes', type: 'integer', minimum: 0, description: 'Monthly cumulative minutes seated as owner/speaker'),
+        new OA\Property(property: 'target_coins', type: 'integer', minimum: 0, description: 'Monthly cumulative coins spent sending gifts'),
+        new OA\Property(property: 'host_reward_paise', type: 'integer', minimum: 0),
+        new OA\Property(property: 'agency_reward_paise', type: 'integer', minimum: 0, description: 'Paid only if the host has an agency'),
+        new OA\Property(property: 'is_active', type: 'boolean'),
+    ])),
+    responses: [new OA\Response(response: 201, description: 'Created', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Patch(
+    path: '/admin/gift-target-policies/{policy}',
+    summary: 'Update a rung',
+    security: [['bearerAuth' => []]],
+    tags: ['Hosts'],
+    parameters: [new OA\Parameter(name: 'policy', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(content: new OA\JsonContent(type: 'object')),
+    responses: [new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Get(
+    path: '/admin/hosts/gift-targets',
+    summary: 'Gift-target results for a month, scoped',
+    security: [['bearerAuth' => []]],
+    tags: ['Hosts'],
+    parameters: [new OA\Parameter(name: 'period', description: 'YYYY-MM', in: 'query', required: true, schema: new OA\Schema(type: 'string'))],
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Get(
+    path: '/admin/hosts/gift-targets/tracker',
+    summary: 'One progress row per active host, always — the Hosts page\'s Targets tab',
+    description: <<<'MD'
+Unlike `/admin/hosts/gift-targets` (which only lists hosts already evaluated for a month),
+this always returns every scoped active host, whether or not they have been evaluated yet.
+
+A host already evaluated for the requested month (current month by default) shows their
+frozen result. Everyone else shows **live** progress toward the ladder — the lowest rung
+they have not yet fully cleared, with a `coins_pct` and `minutes_pct` against that rung's
+two thresholds separately, plus their blended `overall_pct`. `source` says which case
+applies, the same distinction `HostTargetRow.source` already makes for A.8b's targets.
+MD,
+    security: [['bearerAuth' => []]],
+    tags: ['Hosts'],
+    parameters: [new OA\Parameter(name: 'period', description: 'YYYY-MM, defaults to the current month', in: 'query', schema: new OA\Schema(type: 'string'))],
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/hosts/gift-targets/evaluate-all',
+    summary: 'Evaluate every host for a month, in one pass',
+    description: 'The admin-triggered equivalent of mehfil\'s `salary:distribute-host` cron — an explicit action rather than an unattended nightly job, so it shows up in the audit log against whoever ran it. Already-evaluated hosts for that month are skipped, not re-run.',
+    security: [['bearerAuth' => []]],
+    tags: ['Hosts'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['period'], properties: [
+        new OA\Property(property: 'period', type: 'string', example: '2026-09'),
+    ])),
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/hosts/{host}/gift-targets/evaluate',
+    summary: 'Evaluate one host for a month',
+    description: 'Refused if that host\'s month has already been evaluated — the frozen result does not move once decided.',
+    security: [['bearerAuth' => []]],
+    tags: ['Hosts'],
+    parameters: [new OA\Parameter(name: 'host', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['period'], properties: [
+        new OA\Property(property: 'period', type: 'string', example: '2026-09'),
+    ])),
+    responses: [
+        new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 400, description: '`BAD_REQUEST` — already evaluated', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+
 #[OA\Get(
     path: '/admin/settlements',
     summary: 'Agency settlements (A.8d)',

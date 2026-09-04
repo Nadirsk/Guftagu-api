@@ -210,6 +210,56 @@ class RankingController extends Controller
         return ApiResponse::success(['id' => $reward->id], 'Reward band added', 201);
     }
 
+    /**
+     * Bands carry no capacity/claimed counter (unlike event rewards) — a payout copies
+     * `reward_type`/`reward_value` onto its own row at the moment it pays, so editing or
+     * removing a band afterwards cannot retouch a payout that already happened.
+     */
+    public function updateReward(Request $request, RankingRule $rule, RankingReward $reward): JsonResponse
+    {
+        $data = $request->validate([
+            'rank_from'    => ['sometimes', 'integer', 'min:1'],
+            'rank_to'      => ['sometimes', 'integer', 'gte:rank_from'],
+            'reward_type'  => ['sometimes', ValidationRule::in(['coins', 'diamonds'])],
+            'reward_value' => ['sometimes', 'integer', 'min:1', 'max:100000000'],
+        ]);
+
+        $rankFrom = $data['rank_from'] ?? $reward->rank_from;
+        $rankTo = $data['rank_to'] ?? $reward->rank_to;
+
+        if ($rankTo < $rankFrom) {
+            return ApiResponse::error('VALIDATION_ERROR', 'The rank range is inverted.', null, 422);
+        }
+
+        $clash = RankingReward::query()
+            ->where('rule_key', $rule->key)
+            ->where('is_active', true)
+            ->where('id', '!=', $reward->id)
+            ->where('rank_from', '<=', $rankTo)
+            ->where('rank_to', '>=', $rankFrom)
+            ->first();
+
+        if ($clash !== null) {
+            return ApiResponse::error(
+                'VALIDATION_ERROR',
+                'That rank range overlaps an existing reward band.',
+                ['overlapping' => ['rank_from' => $clash->rank_from, 'rank_to' => $clash->rank_to]],
+                422,
+            );
+        }
+
+        $reward->fill($data)->save();
+
+        return ApiResponse::success(null, 'Reward band updated');
+    }
+
+    public function removeReward(RankingRule $rule, RankingReward $reward): JsonResponse
+    {
+        $reward->delete();
+
+        return ApiResponse::success(null, 'Reward band removed');
+    }
+
     // ----------------------------------------------------------------- shared
 
     /** @return array<string, mixed> */

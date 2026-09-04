@@ -17,6 +17,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Admin-panel upload disk
+    |--------------------------------------------------------------------------
+    |
+    | GiftController's uploadAnimation/uploadThumbnail, its category-icon upload,
+    | and LevelController's badge upload all read this rather than a hardcoded disk
+    | name — local in dev, 'vultr' once real credentials exist below. Left at
+    | 'public' means "not configured yet"; nothing else needs to change to switch.
+    */
+    'uploads_disk' => env('UPLOADS_DISK', 'public'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Filesystem Disks
     |--------------------------------------------------------------------------
     |
@@ -56,6 +68,25 @@ return [
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'throw' => false,
+            'report' => false,
+        ],
+
+        // S3-compatible Object Storage. Same driver as 's3' above, pointed at
+        // Vultr's endpoint instead — this is what UPLOADS_DISK=vultr switches to.
+        'vultr' => [
+            'driver' => 's3',
+            'key' => env('VULTR_ACCESS_KEY_ID'),
+            'secret' => env('VULTR_SECRET_ACCESS_KEY'),
+            'region' => env('VULTR_DEFAULT_REGION'),
+            'bucket' => env('VULTR_BUCKET'),
+            'endpoint' => env('VULTR_ENDPOINT'),
+            'url' => env('VULTR_URL'),
+            'use_path_style_endpoint' => env('VULTR_USE_PATH_STYLE_ENDPOINT', true),
+            // Disk-level default; ImageUploadService also passes 'public' explicitly
+            // per write, the same belt-and-suspenders mehfil's own code does — Vultr
+            // Object Storage denies reads on anything uploaded without this.
+            'visibility' => 'public',
             'throw' => false,
             'report' => false,
         ],

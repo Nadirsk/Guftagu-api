@@ -15,7 +15,7 @@ PSR-12 enforced via CI*) and §10 M7 (*production deployment*).
 | **PHP** | 8.3 | 8.3 | 8.3 |
 | **MySQL** | local 8.0 | Managed dev, 1 GB | Managed 2 vCPU / 4 GB, daily backup + PITR |
 | **Redis** | WSL2 / Memurai | Managed 250 MB | Managed 1 GB, eviction `noeviction` |
-| **Storage** | local disk | Spaces `guftagu-staging` | Spaces `guftagu-prod` + CDN |
+| **Storage** | local disk | Vultr Object Storage `guftagu-staging` | Vultr Object Storage `guftagu-prod` + CDN |
 | **WebSocket** | `reverb:start` | Reverb on the droplet | Reverb on both droplets, sticky sessions at the LB |
 | **Queues** | `queue:work` | Horizon, 2 workers | Horizon, 6 workers across 3 queues |
 | **Agora** | staging project | staging project | production project |
@@ -130,7 +130,7 @@ jobs:
 2. **Droplets** — 2× Ubuntu 24.04, 4 vCPU / 8 GB, private networking only.
 3. **Managed MySQL 8** — 2 vCPU / 4 GB, daily backups, 7-day PITR, private-network access only.
 4. **Managed Redis 7** — 1 GB, `noeviction` (evicting room state silently is worse than failing loudly).
-5. **Spaces** `guftagu-prod` + CDN, CORS restricted to the app and admin origins.
+5. **Vultr Object Storage** `guftagu-prod` + CDN, CORS restricted to the app and admin origins.
 6. **Load balancer** — HTTPS, TLS 1.3, **sticky sessions** (Reverb requires them), health check on
    `/api/v1/health`.
 7. **Firewall** — 80/443 from the LB only; 22 from the office IP only; MySQL and Redis private only.
@@ -338,9 +338,9 @@ security fix or a breaking API change ships.
 | What | Method | Frequency | Retention | Restore target |
 |---|---|---|---|---|
 | MySQL | DO managed backup + PITR | Daily + continuous | 7 days PITR, 30 days daily | < 1 h |
-| MySQL financial tables | Additional `mysqldump` to Spaces | Daily | 1 year | < 2 h |
+| MySQL financial tables | Additional `mysqldump` to Vultr Object Storage | Daily | 1 year | < 2 h |
 | Redis | RDB snapshot | Hourly | 24 h | Rebuild from MySQL if needed |
-| Spaces media | Versioning + cross-region replication | Continuous | Indefinite | Immediate |
+| Vultr Object Storage media | Versioning + cross-region replication | Continuous | Indefinite | Immediate |
 | Code | GitHub | Every push | Indefinite | Immediate |
 | Secrets | Encrypted vault export | On change | Indefinite | Immediate |
 

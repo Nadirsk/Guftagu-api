@@ -9,6 +9,7 @@ use App\Domain\Events\EventException;
 use App\Domain\Moderation\ModerationException;
 use App\Domain\Reports\ReportException;
 use App\Domain\Rooms\RoomException;
+use App\Domain\Store\LevelException;
 use App\Domain\Support\SupportException;
 use App\Domain\Users\SanctionException;
 use App\Domain\Wallet\WalletException;
@@ -17,6 +18,7 @@ use App\Http\Middleware\CaptureUnauditedMutations;
 use App\Http\Middleware\EnforceIdleTimeout;
 use App\Http\Middleware\EnsureAdminActive;
 use App\Http\Middleware\EnsurePermission;
+use App\Http\Middleware\EnsureRole;
 use App\Support\ApiResponse;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -50,6 +52,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'permission'   => EnsurePermission::class,
+            'role'         => EnsureRole::class,
             'admin.active' => EnsureAdminActive::class,
             'admin.idle'   => EnforceIdleTimeout::class,
         ]);
@@ -103,6 +106,10 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (ReportException $e, Request $request) {
+            return $request->expectsJson() || $request->is('api/*') ? $e->render() : null;
+        });
+
+        $exceptions->render(function (LevelException $e, Request $request) {
             return $request->expectsJson() || $request->is('api/*') ? $e->render() : null;
         });
 
