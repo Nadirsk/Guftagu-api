@@ -37,6 +37,8 @@ class CmsReportsAuditTest extends TestCase
 
     protected AdminUser $superAdmin;
 
+    protected AdminUser $itAdmin;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -47,6 +49,11 @@ class CmsReportsAuditTest extends TestCase
         $this->superAdmin = AdminUser::create([
             'name' => 'Super', 'email' => 'super@test.local', 'password' => 'Password12345',
             'role_id' => Role::where('key', Role::SUPER_ADMIN)->value('id'), 'status' => 'active',
+        ]);
+
+        $this->itAdmin = AdminUser::create([
+            'name' => 'IT Admin', 'email' => 'itadmin@test.local', 'password' => 'Password12345',
+            'role_id' => Role::where('key', 'it_admin')->value('id'), 'status' => 'active',
         ]);
     }
 
@@ -732,7 +739,9 @@ class CmsReportsAuditTest extends TestCase
             'edit a banner' => fn () => $this->actingAs($this->superAdmin, 'sanctum-admin')
                 ->patchJson("{$this->base}/content/banners/{$banner->id}", ['title' => 'Renamed']),
 
-            'create a role' => fn () => $this->actingAs($this->superAdmin, 'sanctum-admin')
+            // Roles routes are IT Admin only (role:it_admin) — Super Admin's blanket
+            // bypass does not reach them.
+            'create a role' => fn () => $this->actingAs($this->itAdmin, 'sanctum-admin')
                 ->postJson("{$this->base}/roles", ['key' => 'auditor', 'name' => 'Auditor']),
         ];
 

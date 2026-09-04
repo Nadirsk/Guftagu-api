@@ -76,7 +76,7 @@ use OpenApi\Attributes as OA;
 #[OA\Get(
     path: '/admin/roles',
     summary: 'List roles with permission and admin counts',
-    description: '`permission_count` for `super_admin` reports the full catalogue size, not 0 — it holds no `role_permission` rows by design and resolves by short-circuit.',
+    description: 'IT Admin login only — `role:it_admin`, not just the `access.role_manage` permission, so Super Admin\'s blanket bypass does not reach this screen. `super_admin`\'s own definition is never listed, for the same reason: it "cannot be scoped or limited", so there is nothing here to manage.',
     security: [['bearerAuth' => []]],
     tags: ['Roles'],
     responses: [
@@ -97,12 +97,13 @@ use OpenApi\Attributes as OA;
                 new OA\Property(property: 'meta', ref: '#/components/schemas/Meta'),
             ])
         ),
-        new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `access.role_manage`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `access.role_manage` and the `it_admin` role', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]
 #[OA\Get(
     path: '/admin/roles/{role}',
     summary: 'One role and its full permission-key list',
+    description: 'IT Admin login only (see the list operation above). Requesting `super_admin`\'s id returns 404 rather than 403, so the response does not confirm the role exists.',
     security: [['bearerAuth' => []]],
     tags: ['Roles'],
     parameters: [

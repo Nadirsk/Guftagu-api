@@ -28,6 +28,10 @@ class RoleController extends Controller
     {
         $roles = Role::query()
             ->withCount(['permissions', 'adminUsers'])
+            // This whole route is IT Admin only (routes/api.php), and Super Admin's own
+            // definition still doesn't belong in a list IT Admin can see — it "cannot be
+            // scoped or limited" by design (RoleSeeder), so there is nothing here to manage.
+            ->where('key', '!=', Role::SUPER_ADMIN)
             ->orderBy('id')
             ->get();
 
@@ -37,19 +41,19 @@ class RoleController extends Controller
             'name'             => $role->name,
             'description'      => $role->description,
             'is_system'        => $role->isSystem(),
-            // super_admin holds no rows by design — report its true reach, not 0.
-            'permission_count' => $role->key === Role::SUPER_ADMIN
-                ? Permission::query()->count()
-                : $role->permissions_count,
+            'permission_count' => $role->permissions_count,
             'admin_count'      => $role->admin_users_count,
         ])->all());
     }
 
     public function show(Role $role): JsonResponse
     {
-        $keys = $role->key === Role::SUPER_ADMIN
-            ? Permission::allKeys()
-            : $role->permissions()->pluck('key');
+        // Not found rather than forbidden — a 403 would confirm the role exists.
+        if ($role->key === Role::SUPER_ADMIN) {
+            return ApiResponse::error('NOT_FOUND', 'Role not found', null, 404);
+        }
+
+        $keys = $role->permissions()->pluck('key');
 
         return ApiResponse::success([
             'id'          => $role->id,

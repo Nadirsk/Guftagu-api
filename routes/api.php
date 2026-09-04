@@ -99,8 +99,10 @@ Route::prefix('v1')->group(function () {
                     ->name('settings.session-timeout');
             });
 
-            // ---- roles
-            Route::middleware('permission:access.role_manage')->group(function () {
+            // ---- roles — IT Admin login only, same reasoning as system logs: neither
+            // Super Admin's blanket permission bypass nor a direct grant of
+            // `access.role_manage` is enough, only actually being IT Admin.
+            Route::middleware(['permission:access.role_manage', 'role:it_admin'])->group(function () {
                 Route::get('roles', [RoleController::class, 'index'])->name('roles.index');
                 Route::get('roles/{role}', [RoleController::class, 'show'])->name('roles.show');
                 Route::post('roles', [RoleController::class, 'store'])->name('roles.store');
@@ -375,6 +377,10 @@ Route::prefix('v1')->group(function () {
             // view a user is not the same as being allowed to ban them or move their money.
             Route::get('users', [UserController::class, 'index'])
                 ->middleware('permission:users.view')->name('users.index');
+            Route::post('users', [UserController::class, 'store'])
+                ->middleware('permission:users.create')->name('users.store');
+            Route::post('users/kyc-documents', [UserController::class, 'uploadKycDocument'])
+                ->middleware('permission:users.create')->name('users.kyc_documents.upload');
             Route::get('users/{user}', [UserController::class, 'show'])
                 ->middleware('permission:users.view')->name('users.show');
             Route::get('users/{user}/pii', [UserController::class, 'pii'])

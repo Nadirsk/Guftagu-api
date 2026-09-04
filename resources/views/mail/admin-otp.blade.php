@@ -10,6 +10,8 @@ Use this code to finish signing in to the Guftagu admin panel.
 @endif
 
 <x-mail::panel>
+<p style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #5d6b81; margin: 0 0 6px;">{{ $purpose === 'reauth' ? 'Confirmation code' : 'Login code' }}</p>
+
 # {{ $otp }}
 </x-mail::panel>
 

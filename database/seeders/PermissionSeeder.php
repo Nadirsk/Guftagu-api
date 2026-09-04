@@ -28,6 +28,7 @@ class PermissionSeeder extends Seeder
         ],
         'users' => [
             'view'       => ['View users', 'low'],
+            'create'     => ['Create a user account', 'medium'],
             'view_pii'   => ['Reveal unmasked phone/email', 'high'],
             'edit'       => ['Edit user profile', 'medium'],
             'suspend'    => ['Suspend a user', 'medium'],

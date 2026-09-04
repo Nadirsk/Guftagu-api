@@ -47,6 +47,96 @@ MD,
         new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `users.view`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]
+#[OA\Post(
+    path: '/admin/users',
+    summary: 'Create an app user (admin-side)',
+    description: <<<'MD'
+Real users onboard through the app's own phone/OTP flow, which lives outside this panel
+entirely. This exists so support/QA can spin up an account — optionally with a starting
+wallet balance and a KYC record — without waiting on that path.
+
+`guftagu_id` and `agora_uid` are generated server-side and never accepted from the caller.
+
+Crediting a starting balance also needs `wallet.manual_credit`; setting `kyc.status` to
+anything but `pending` also needs `users.kyc_verify` — the same "one permission per
+action" rule every other route in this file follows. Neither is required for a plain
+account with no balance and no KYC (or a `pending` one).
+MD,
+    security: [['bearerAuth' => []]],
+    tags: ['Users'],
+    requestBody: new OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(required: ['display_name', 'phone'], properties: [
+            new OA\Property(property: 'display_name', type: 'string', maxLength: 50, example: 'Aarav Sharma'),
+            new OA\Property(property: 'phone', type: 'string', example: '+919876543210'),
+            new OA\Property(property: 'country_code', type: 'string', example: '+91'),
+            new OA\Property(property: 'email', type: 'string', nullable: true),
+            new OA\Property(property: 'status', type: 'string', enum: ['active', 'suspended', 'banned'], default: 'active'),
+            new OA\Property(property: 'gender', type: 'string', nullable: true),
+            new OA\Property(property: 'date_of_birth', type: 'string', format: 'date', nullable: true),
+            new OA\Property(property: 'country', type: 'string', nullable: true),
+            new OA\Property(property: 'city', type: 'string', nullable: true),
+            new OA\Property(property: 'language', type: 'string', nullable: true, example: 'en'),
+            new OA\Property(property: 'initial_coins', type: 'integer', minimum: 0, default: 0),
+            new OA\Property(property: 'initial_diamonds', type: 'integer', minimum: 0, default: 0),
+            new OA\Property(property: 'kyc', type: 'object', nullable: true, properties: [
+                new OA\Property(property: 'status', type: 'string', enum: ['pending', 'verified', 'rejected']),
+                new OA\Property(property: 'doc_type', type: 'string', example: 'aadhaar'),
+                new OA\Property(property: 'doc_number', type: 'string'),
+                new OA\Property(property: 'upi_id', type: 'string'),
+                new OA\Property(property: 'ifsc', type: 'string'),
+                new OA\Property(property: 'doc_front_url', type: 'string', description: 'From POST /admin/users/kyc-documents; falls back to a labelled placeholder when omitted'),
+                new OA\Property(property: 'doc_back_url', type: 'string'),
+                new OA\Property(property: 'selfie_url', type: 'string'),
+            ]),
+        ])
+    ),
+    responses: [
+        new OA\Response(
+            response: 201,
+            description: 'Created',
+            content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'success', type: 'boolean', example: true),
+                new OA\Property(property: 'data', ref: '#/components/schemas/UserRow'),
+                new OA\Property(property: 'meta', ref: '#/components/schemas/Meta'),
+            ])
+        ),
+        new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `users.create`, plus `wallet.manual_credit` and/or `users.kyc_verify` depending on the body', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — including a phone or email already in use', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Post(
+    path: '/admin/users/kyc-documents',
+    summary: 'Upload one KYC document ahead of creating the user',
+    description: 'The create-user form has no user id yet to attach a document to, so this stores the file and hands back a URL — the same shape as the level-badge upload — which the caller then includes as `kyc.doc_front_url` / `kyc.doc_back_url` / `kyc.selfie_url` in `POST /admin/users`.',
+    security: [['bearerAuth' => []]],
+    tags: ['Users'],
+    requestBody: new OA\RequestBody(
+        required: true,
+        content: new OA\MediaType(mediaType: 'multipart/form-data', schema: new OA\Schema(
+            required: ['file', 'side'],
+            properties: [
+                new OA\Property(property: 'file', type: 'string', format: 'binary'),
+                new OA\Property(property: 'side', type: 'string', enum: ['doc_front', 'doc_back', 'selfie']),
+            ],
+        ))
+    ),
+    responses: [
+        new OA\Response(
+            response: 200,
+            description: 'OK',
+            content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'success', type: 'boolean', example: true),
+                new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'url', type: 'string'),
+                ]),
+                new OA\Property(property: 'meta', ref: '#/components/schemas/Meta'),
+            ])
+        ),
+        new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `users.create`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
 #[OA\Get(
     path: '/admin/users/{user}',
     summary: 'User detail aggregate (GFT-024)',
@@ -110,9 +200,20 @@ MD,
         new OA\Property(property: 'bio', type: 'string', maxLength: 300, nullable: true),
         new OA\Property(property: 'country', type: 'string', nullable: true),
         new OA\Property(property: 'city', type: 'string', nullable: true),
+        new OA\Property(property: 'gender', type: 'string', nullable: true),
+        new OA\Property(property: 'date_of_birth', type: 'string', format: 'date', nullable: true),
+        new OA\Property(property: 'language', type: 'string', nullable: true, example: 'en'),
     ])),
     responses: [
-        new OA\Response(response: 200, description: 'User updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(
+            response: 200,
+            description: 'User updated',
+            content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'success', type: 'boolean', example: true),
+                new OA\Property(property: 'data', ref: '#/components/schemas/UserRow'),
+                new OA\Property(property: 'meta', ref: '#/components/schemas/Meta'),
+            ])
+        ),
         new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `users.edit`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]

@@ -113,4 +113,22 @@ return [
         'name' => env('MAIL_FROM_NAME', 'Example'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Markdown Mail Settings
+    |--------------------------------------------------------------------------
+    |
+    | Points at the published components in resources/views/vendor/mail so the
+    | Guftagu theme there (html/themes/default.css) is what markdown mailables
+    | like AdminOtpMail actually render with, instead of the framework default.
+    |
+    */
+
+    'markdown' => [
+        'theme' => 'default',
+        'paths' => [
+            resource_path('views/vendor/mail'),
+        ],
+    ],
+
 ];

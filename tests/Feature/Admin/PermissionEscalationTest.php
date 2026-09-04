@@ -261,7 +261,9 @@ class PermissionEscalationTest extends TestCase
     {
         $this->assertTrue($this->resolver()->has($this->moderator, 'reports.view'));
 
-        $this->actingAs($this->superAdmin, 'sanctum-admin')
+        // Roles routes are IT Admin only (role:it_admin) — Super Admin's blanket bypass
+        // does not reach them.
+        $this->actingAs($this->makeAdmin('it_admin'), 'sanctum-admin')
             ->patchJson($this->base.'/roles/'.Role::where('key', Role::MODERATOR)->value('id'), [
                 'permissions' => ['rooms.view'],
             ])->assertOk();
@@ -453,6 +455,49 @@ class PermissionEscalationTest extends TestCase
             ])
             ->assertStatus(422)
             ->assertJsonPath('error.code', 'VALIDATION_ERROR');
+    }
+
+    #[Test]
+    public function super_admin_and_it_admin_never_appear_in_the_panel_users_list(): void
+    {
+        $this->makeAdmin('it_admin');
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->getJson($this->base.'/admins')
+            ->assertOk();
+
+        $roles = collect($response->json('data'))->pluck('role.key');
+
+        $this->assertNotContains(Role::SUPER_ADMIN, $roles);
+        $this->assertNotContains('it_admin', $roles);
+        $this->assertContains(Role::ADMIN, $roles);
+    }
+
+    #[Test]
+    public function roles_are_it_admin_only_and_super_admins_own_role_is_never_listed(): void
+    {
+        $itAdmin = $this->makeAdmin('it_admin');
+        $superAdminRoleId = Role::where('key', Role::SUPER_ADMIN)->value('id');
+
+        // Super Admin's blanket permission bypass does not reach the roles screen at
+        // all — `role:it_admin` is a hard identity check, not a permission grant.
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->getJson($this->base.'/roles')
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'PERMISSION_DENIED');
+
+        // IT Admin can reach it, but Super Admin's own definition is still absent —
+        // it "cannot be scoped or limited", so there is nothing here to manage.
+        $roles = $this->actingAs($itAdmin->fresh(), 'sanctum-admin')
+            ->getJson($this->base.'/roles')->assertOk()
+            ->json('data');
+
+        $this->assertNotContains(Role::SUPER_ADMIN, collect($roles)->pluck('key'));
+        $this->assertContains('it_admin', collect($roles)->pluck('key'));
+
+        $this->actingAs($itAdmin->fresh(), 'sanctum-admin')
+            ->getJson($this->base.'/roles/'.$superAdminRoleId)
+            ->assertStatus(404);
     }
 
     #[Test]

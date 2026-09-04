@@ -2,16 +2,23 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Domain\Access\Exceptions\PermissionException;
+use App\Domain\Access\Services\PermissionResolver;
 use App\Domain\Audit\AuditLogger;
+use App\Domain\Media\ImageUploadService;
 use App\Domain\Users\SanctionService;
 use App\Domain\Wallet\WalletService;
 use App\Http\Controllers\Controller;
+use App\Models\LedgerTransaction;
 use App\Models\User;
 use App\Models\UserKyc;
+use App\Models\UserProfile;
+use App\Models\Wallet;
 use App\Models\WealthCharmLevel;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -24,10 +31,15 @@ class UserController extends Controller
 {
     protected const SORTABLE = ['id', 'guftagu_id', 'status', 'created_at', 'last_active_at'];
 
+    /** Same ceiling as every other admin-uploaded image (docs/01 §6). */
+    protected const MAX_KYC_DOC_KB = 5120;
+
     public function __construct(
         protected WalletService $wallets,
         protected SanctionService $sanctions,
         protected AuditLogger $audit,
+        protected PermissionResolver $resolver,
+        protected ImageUploadService $uploads,
     ) {
     }
 
@@ -74,6 +86,165 @@ class UserController extends Controller
         return ApiResponse::paginated($paginator, collect($paginator->items())->map(
             fn (User $user) => $this->rowPayload($user)
         )->all());
+    }
+
+    /**
+     * POST /admin/users — an admin-created account.
+     *
+     * Real users onboard through the app's own phone/OTP flow, which lives outside this
+     * panel entirely; this exists so support/QA can spin up an account (optionally with a
+     * starting balance and a KYC record) without waiting on that path. `guftagu_id` and
+     * `agora_uid` are generated here, never accepted from the caller, so they can never
+     * collide or be spoofed. Crediting a balance or setting KYC to anything but `pending`
+     * reaches into wallet/KYC territory, so those still need their own permission on top
+     * of `users.create` — the same "one key per action" rule every other route follows.
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'display_name'     => ['required', 'string', 'max:50'],
+            'phone'            => ['required', 'string', 'max:20'],
+            'country_code'     => ['sometimes', 'string', 'max:5'],
+            'email'            => ['sometimes', 'nullable', 'email:filter', 'max:191'],
+            'status'           => ['sometimes', Rule::in([User::STATUS_ACTIVE, User::STATUS_SUSPENDED, User::STATUS_BANNED])],
+            'gender'           => ['sometimes', 'nullable', 'string', 'max:20'],
+            'date_of_birth'    => ['sometimes', 'nullable', 'date', 'before:-18 years'],
+            'country'          => ['sometimes', 'nullable', 'string', 'max:80'],
+            'city'             => ['sometimes', 'nullable', 'string', 'max:80'],
+            'language'         => ['sometimes', 'nullable', 'string', 'max:5'],
+            'initial_coins'    => ['sometimes', 'integer', 'min:0'],
+            'initial_diamonds' => ['sometimes', 'integer', 'min:0'],
+            'kyc'              => ['sometimes', 'nullable', 'array'],
+            'kyc.status'       => ['required_with:kyc', Rule::in([UserKyc::PENDING, UserKyc::VERIFIED, UserKyc::REJECTED])],
+            'kyc.doc_type'     => ['sometimes', 'nullable', 'string', 'max:30'],
+            'kyc.doc_number'   => ['sometimes', 'nullable', 'string', 'max:50'],
+            'kyc.upi_id'       => ['sometimes', 'nullable', 'string', 'max:100'],
+            'kyc.ifsc'         => ['sometimes', 'nullable', 'string', 'max:20'],
+            // Populated by uploadKycDocument below. Falls back to a labelled placeholder
+            // when omitted, same as before this existed.
+            'kyc.doc_front_url' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'kyc.doc_back_url'  => ['sometimes', 'nullable', 'string', 'max:500'],
+            'kyc.selfie_url'    => ['sometimes', 'nullable', 'string', 'max:500'],
+        ]);
+
+        $actor = $request->user();
+
+        $fundsInitial = ($data['initial_coins'] ?? 0) > 0 || ($data['initial_diamonds'] ?? 0) > 0;
+
+        if ($fundsInitial && ! $this->resolver->has($actor, 'wallet.manual_credit')) {
+            return PermissionException::denied('wallet.manual_credit')->render();
+        }
+
+        if (isset($data['kyc']) && $data['kyc']['status'] !== UserKyc::PENDING
+            && ! $this->resolver->has($actor, 'users.kyc_verify')) {
+            return PermissionException::denied('users.kyc_verify')->render();
+        }
+
+        if (User::query()->where('phone_hash', User::hash($data['phone']))->exists()) {
+            return ApiResponse::error('VALIDATION_ERROR', 'A user with that phone number already exists.', ['phone' => ['Already taken']], 422);
+        }
+
+        if (! empty($data['email']) && User::query()->where('email_hash', User::hash($data['email']))->exists()) {
+            return ApiResponse::error('VALIDATION_ERROR', 'A user with that email already exists.', ['email' => ['Already taken']], 422);
+        }
+
+        $user = DB::transaction(function () use ($data, $actor) {
+            $user = User::create([
+                'guftagu_id'      => $this->generateGuftaguId(),
+                'phone'           => $data['phone'],
+                'country_code'    => $data['country_code'] ?? '+91',
+                'email'           => $data['email'] ?? null,
+                'status'          => $data['status'] ?? User::STATUS_ACTIVE,
+                'agora_uid'       => $this->generateAgoraUid(),
+                'registered_ip'   => request()->ip(),
+                'consent_version' => '1.0',
+                'consent_at'      => now(),
+            ]);
+
+            UserProfile::create(array_filter([
+                'user_id'             => $user->id,
+                'display_name'        => $data['display_name'],
+                'gender'              => $data['gender'] ?? null,
+                'date_of_birth'       => $data['date_of_birth'] ?? null,
+                'country'             => $data['country'] ?? null,
+                'city'                => $data['city'] ?? null,
+                'language'            => $data['language'] ?? null,
+                'is_profile_complete' => true,
+            ], fn ($value) => $value !== null));
+
+            $this->wallets->forUser($user);
+
+            if (($data['initial_coins'] ?? 0) > 0) {
+                $this->wallets->adjust(
+                    $user, Wallet::COIN, LedgerTransaction::CREDIT,
+                    $data['initial_coins'], 'Initial balance on account creation', $actor,
+                );
+            }
+
+            if (($data['initial_diamonds'] ?? 0) > 0) {
+                $this->wallets->adjust(
+                    $user, Wallet::DIAMOND, LedgerTransaction::CREDIT,
+                    $data['initial_diamonds'], 'Initial balance on account creation', $actor,
+                );
+            }
+
+            if (isset($data['kyc'])) {
+                $isReviewed = $data['kyc']['status'] !== UserKyc::PENDING;
+
+                // A real, uploaded document wins; otherwise (no real documents exist for
+                // an admin-created account) the reviewer screen gets a clearly-labelled
+                // placeholder instead of "not supplied".
+                UserKyc::create([
+                    'user_id'       => $user->id,
+                    'full_name'     => $data['display_name'],
+                    'doc_type'      => $data['kyc']['doc_type'] ?? 'aadhaar',
+                    'doc_number'    => $data['kyc']['doc_number'] ?? '9876'.str_pad((string) $user->id, 8, '0', STR_PAD_LEFT),
+                    'doc_front_url' => $data['kyc']['doc_front_url'] ?? "https://placehold.co/800x500?text=Aadhaar+Front+{$user->id}",
+                    'doc_back_url'  => $data['kyc']['doc_back_url'] ?? "https://placehold.co/800x500?text=Aadhaar+Back+{$user->id}",
+                    'selfie_url'    => $data['kyc']['selfie_url'] ?? "https://placehold.co/500x500?text=Selfie+{$user->id}",
+                    'upi_id'        => $data['kyc']['upi_id'] ?? null,
+                    'ifsc'          => $data['kyc']['ifsc'] ?? null,
+                    'status'        => $data['kyc']['status'],
+                    'reviewed_by'   => $isReviewed ? $actor->id : null,
+                    'reviewed_at'   => $isReviewed ? now() : null,
+                ]);
+            }
+
+            return $user;
+        });
+
+        $this->audit->log($actor, 'user.create', 'users', User::class, $user->id, null, [
+            'guftagu_id' => $user->guftagu_id,
+            'status'     => $user->status,
+        ]);
+
+        return ApiResponse::success(
+            $this->rowPayload($user->fresh(['profile', 'wallet', 'kyc'])),
+            'User created',
+            201,
+        );
+    }
+
+    /**
+     * POST /admin/users/kyc-documents — uploads one document ahead of POST /admin/users,
+     * which has no user id yet to attach it to. Same pattern as LevelController's badge
+     * upload: store the file, hand back a URL, the caller carries it into the next call.
+     */
+    public function uploadKycDocument(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'file' => [
+                'required', 'file', 'max:'.self::MAX_KYC_DOC_KB,
+                'mimes:jpg,jpeg,png,webp',
+            ],
+            'side' => ['required', Rule::in(['doc_front', 'doc_back', 'selfie'])],
+        ], [
+            'file.max' => 'That image is larger than '.(self::MAX_KYC_DOC_KB / 1024).' MB.',
+        ]);
+
+        $result = $this->uploads->store($request->file('file'), 'kyc-documents/'.$data['side']);
+
+        return ApiResponse::success(['url' => $result['url']], 'Document uploaded');
     }
 
     /**
@@ -191,10 +362,13 @@ class UserController extends Controller
     public function update(Request $request, User $user): JsonResponse
     {
         $data = $request->validate([
-            'display_name' => ['sometimes', 'string', 'max:50'],
-            'bio'          => ['sometimes', 'nullable', 'string', 'max:300'],
-            'country'      => ['sometimes', 'nullable', 'string', 'max:80'],
-            'city'         => ['sometimes', 'nullable', 'string', 'max:80'],
+            'display_name'  => ['sometimes', 'string', 'max:50'],
+            'bio'           => ['sometimes', 'nullable', 'string', 'max:300'],
+            'country'       => ['sometimes', 'nullable', 'string', 'max:80'],
+            'city'          => ['sometimes', 'nullable', 'string', 'max:80'],
+            'gender'        => ['sometimes', 'nullable', 'string', 'max:20'],
+            'date_of_birth' => ['sometimes', 'nullable', 'date', 'before:-18 years'],
+            'language'      => ['sometimes', 'nullable', 'string', 'max:5'],
         ]);
 
         $profile = $user->profile()->firstOrCreate(
@@ -207,7 +381,7 @@ class UserController extends Controller
 
         $this->audit->log($request->user(), 'user.update', 'users', User::class, $user->id, $before, $data);
 
-        return ApiResponse::success(null, 'User updated');
+        return ApiResponse::success($this->rowPayload($user->fresh(['profile', 'wallet', 'kyc'])), 'User updated');
     }
 
     /** POST /admin/users/{user}/suspend — A.3c. */
@@ -323,6 +497,26 @@ class UserController extends Controller
     }
 
     // ----------------------------------------------------------------- internals
+
+    /** `GF` + 7 digits (docs/02 §2.1), retried on the vanishingly rare collision. */
+    protected function generateGuftaguId(): string
+    {
+        do {
+            $candidate = 'GF'.random_int(1_000_000, 9_999_999);
+        } while (User::query()->where('guftagu_id', $candidate)->exists());
+
+        return $candidate;
+    }
+
+    /** Agora requires a numeric uid, unique across the app (create_users_table). */
+    protected function generateAgoraUid(): int
+    {
+        do {
+            $candidate = random_int(100_000, 999_999_999);
+        } while (User::query()->where('agora_uid', $candidate)->exists());
+
+        return $candidate;
+    }
 
     protected function parseSort(string $sort): array
     {

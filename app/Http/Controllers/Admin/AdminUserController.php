@@ -45,6 +45,14 @@ class AdminUserController extends Controller
 
         $query = AdminUser::query()
             ->with('role:id,key,name')
+            // Super Admin and IT Admin are never manageable rows on this screen, for
+            // anyone. Super Admin has no role_permission baseline to manage (it short-
+            // circuits in PermissionResolver) and "cannot be scoped or limited"
+            // (RoleSeeder); IT Admin is excluded from `access.admin_manage` /
+            // `access.permission_grant` by design (RoleSeeder::IT_ADMIN_EXCLUDES) so it
+            // can see platform data but not who else has panel access — that symmetry
+            // only holds if its own row is invisible here too.
+            ->whereHas('role', fn ($q) => $q->whereNotIn('key', [Role::SUPER_ADMIN, 'it_admin']))
             ->when($data['q'] ?? null, function ($q, string $term) {
                 $q->where(function ($inner) use ($term) {
                     $inner->where('name', 'like', "%{$term}%")

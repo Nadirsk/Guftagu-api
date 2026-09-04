@@ -77,6 +77,180 @@ class UserManagementTest extends TestCase
         return $user;
     }
 
+    // ------------------------------------------------------------- create (admin-side)
+
+    #[Test]
+    public function a_super_admin_can_create_a_user_with_wallet_and_kyc(): void
+    {
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/users', [
+                'display_name'     => 'New Person',
+                'phone'            => '+919999900001',
+                'initial_coins'    => 500,
+                'initial_diamonds' => 10,
+                'kyc'              => ['status' => 'verified'],
+            ])
+            ->assertCreated();
+
+        $userId = $response->json('data.id');
+
+        $this->assertSame(500, $response->json('data.coin_balance'));
+        $this->assertSame('verified', $response->json('data.kyc_status'));
+
+        $this->assertDatabaseHas('users', ['id' => $userId, 'guftagu_id' => $response->json('data.guftagu_id')]);
+        $this->assertDatabaseHas('user_profiles', ['user_id' => $userId, 'display_name' => 'New Person']);
+        $this->assertDatabaseHas('coin_transactions', ['user_id' => $userId, 'amount' => 500, 'direction' => 'credit']);
+
+        $kyc = UserKyc::where('user_id', $userId)->first();
+        $this->assertNotNull($kyc->doc_front_url, 'A placeholder document must be set so the reviewer screen is never "not supplied".');
+
+        $this->assertTrue(AuditLog::where('action', 'user.create')->where('entity_id', $userId)->exists());
+    }
+
+    #[Test]
+    public function a_duplicate_phone_is_refused(): void
+    {
+        $this->makeUser(['phone' => '+919999900002']);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/users', [
+                'display_name' => 'Duplicate',
+                'phone'        => '+919999900002',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'VALIDATION_ERROR');
+    }
+
+    #[Test]
+    public function crediting_a_starting_balance_requires_wallet_manual_credit(): void
+    {
+        $admin = $this->makeAdmin(Role::ADMIN);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base."/admins/{$admin->id}/permissions/deny", [
+                'permissions' => ['wallet.manual_credit'],
+            ])->assertOk();
+
+        $this->actingAs($admin->fresh(), 'sanctum-admin')
+            ->postJson($this->base.'/users', [
+                'display_name'  => 'No Wallet Access',
+                'phone'         => '+919999900003',
+                'initial_coins' => 100,
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('error.details.permission', 'wallet.manual_credit');
+
+        // Refused before the transaction opens — nothing was created at all.
+        $this->assertFalse(User::query()->where('phone_hash', User::hash('+919999900003'))->exists());
+    }
+
+    #[Test]
+    public function setting_kyc_to_verified_at_creation_requires_kyc_verify(): void
+    {
+        $admin = $this->makeAdmin(Role::ADMIN);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base."/admins/{$admin->id}/permissions/deny", [
+                'permissions' => ['users.kyc_verify'],
+            ])->assertOk();
+
+        // A pending submission needs no extra permission — only skipping review does.
+        $this->actingAs($admin->fresh(), 'sanctum-admin')
+            ->postJson($this->base.'/users', [
+                'display_name' => 'Pending Only',
+                'phone'        => '+919999900004',
+                'kyc'          => ['status' => 'pending'],
+            ])
+            ->assertCreated();
+
+        $this->actingAs($admin->fresh(), 'sanctum-admin')
+            ->postJson($this->base.'/users', [
+                'display_name' => 'Skip Review',
+                'phone'        => '+919999900005',
+                'kyc'          => ['status' => 'verified'],
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('error.details.permission', 'users.kyc_verify');
+    }
+
+    #[Test]
+    public function a_users_profile_can_be_edited(): void
+    {
+        $user = $this->makeUser([], 'Old Name');
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->patchJson($this->base.'/users/'.$user->id, [
+                'display_name'  => 'New Name',
+                'city'          => 'Pune',
+                'gender'        => 'female',
+                'date_of_birth' => '2000-01-01',
+                'language'      => 'hi',
+            ])
+            ->assertOk();
+
+        $this->assertSame('New Name', $response->json('data.display_name'));
+
+        $this->assertDatabaseHas('user_profiles', [
+            'user_id'       => $user->id,
+            'display_name'  => 'New Name',
+            'city'          => 'Pune',
+            'gender'        => 'female',
+            'date_of_birth' => '2000-01-01',
+            'language'      => 'hi',
+        ]);
+
+        $this->assertTrue(AuditLog::where('action', 'user.update')->where('entity_id', $user->id)->exists());
+    }
+
+    #[Test]
+    public function editing_a_profile_rejects_someone_under_eighteen(): void
+    {
+        $user = $this->makeUser();
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->patchJson($this->base.'/users/'.$user->id, ['date_of_birth' => now()->subYears(10)->toDateString()])
+            ->assertStatus(422);
+    }
+
+    #[Test]
+    public function a_kyc_document_can_be_uploaded_and_attached_at_creation(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake(config('filesystems.uploads_disk', 'public'));
+
+        $upload = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/users/kyc-documents', [
+                'file' => \Illuminate\Http\UploadedFile::fake()->image('front.jpg'),
+                'side' => 'doc_front',
+            ])
+            ->assertOk();
+
+        $url = $upload->json('data.url');
+        $this->assertNotEmpty($url);
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/users', [
+                'display_name' => 'Real Document',
+                'phone'        => '+919999900007',
+                'kyc'          => ['status' => 'pending', 'doc_front_url' => $url],
+            ])
+            ->assertCreated();
+
+        $kyc = UserKyc::where('user_id', $response->json('data.id'))->first();
+        $this->assertSame($url, $kyc->doc_front_url);
+    }
+
+    #[Test]
+    public function a_manager_lacks_users_create(): void
+    {
+        $this->actingAs($this->makeAdmin(Role::MANAGER), 'sanctum-admin')
+            ->postJson($this->base.'/users', [
+                'display_name' => 'Nope',
+                'phone'        => '+919999900006',
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'PERMISSION_DENIED');
+    }
+
     // -------------------------------------------------------------------- A.3a
 
     #[Test]
