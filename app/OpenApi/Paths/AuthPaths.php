@@ -154,6 +154,7 @@ MD,
 #[OA\Patch(
     path: '/admin/auth/profile',
     summary: 'Update your own profile (A.1b)',
+    description: '`email` is only accepted from Super Admin and Admin accounts — Manager/Moderator accounts are provisioned by an admin and get `FORBIDDEN` if they send it.',
     security: [['bearerAuth' => []]],
     tags: ['Auth'],
     requestBody: new OA\RequestBody(
@@ -161,6 +162,7 @@ MD,
             new OA\Property(property: 'name', type: 'string', example: 'Nadir Shaikh'),
             new OA\Property(property: 'phone', type: 'string', example: '+919876543210', nullable: true),
             new OA\Property(property: 'avatar_url', type: 'string', format: 'uri', nullable: true),
+            new OA\Property(property: 'email', type: 'string', format: 'email', example: 'nadir@example.com', description: 'super_admin/admin only'),
         ])
     ),
     responses: [
@@ -174,6 +176,7 @@ MD,
                 new OA\Property(property: 'meta', ref: '#/components/schemas/Meta'),
             ])
         ),
+        new OA\Response(response: 403, description: '`FORBIDDEN` — role may not change its own email', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
         new OA\Response(response: 422, description: '`VALIDATION_ERROR`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]

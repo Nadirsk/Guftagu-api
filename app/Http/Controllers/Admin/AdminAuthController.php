@@ -226,13 +226,25 @@ class AdminAuthController extends Controller
     {
         $admin = $request->user();
 
+        // Only Super Admin and Admin log in with an address they might need to rotate
+        // themselves; Manager/Moderator accounts are provisioned by an admin, so a stray
+        // `email` in the payload for those roles is rejected rather than silently dropped.
+        $mayChangeEmail = in_array($admin->roleKey(), [Role::SUPER_ADMIN, Role::ADMIN], true);
+
+        if ($request->has('email') && ! $mayChangeEmail) {
+            return ApiResponse::error('FORBIDDEN', 'Your role cannot change its own email', null, 403);
+        }
+
         $data = $request->validate([
             'name'       => ['sometimes', 'string', 'max:150'],
             'phone'      => ['sometimes', 'nullable', 'string', 'max:20'],
             'avatar_url' => ['sometimes', 'nullable', 'url', 'max:500'],
+            'email'      => $mayChangeEmail
+                ? ['sometimes', 'email', 'max:191', Rule::unique('admin_users', 'email')->ignore($admin->id)]
+                : ['prohibited'],
         ]);
 
-        $before = $admin->only(['name', 'phone', 'avatar_url']);
+        $before = $admin->only(['name', 'phone', 'avatar_url', 'email']);
 
         $admin->fill($data)->save();
 

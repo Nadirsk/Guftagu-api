@@ -3264,6 +3264,7 @@
                     "Auth"
                 ],
                 "summary": "Update your own profile (A.1b)",
+                "description": "`email` is only accepted from Super Admin and Admin accounts — Manager/Moderator accounts are provisioned by an admin and get `FORBIDDEN` if they send it.",
                 "operationId": "0d21dc4383821a3313c62e036d45e649",
                 "requestBody": {
                     "content": {
@@ -3283,6 +3284,12 @@
                                         "type": "string",
                                         "format": "uri",
                                         "nullable": true
+                                    },
+                                    "email": {
+                                        "description": "super_admin/admin only",
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "nadir@example.com"
                                     }
                                 },
                                 "type": "object"
@@ -3313,6 +3320,16 @@
                                         }
                                     },
                                     "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`FORBIDDEN` — role may not change its own email",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
                                 }
                             }
                         }
