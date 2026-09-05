@@ -3,12 +3,14 @@
 use App\Domain\Access\Exceptions\PermissionException;
 use App\Domain\Access\Exceptions\ScopeException;
 use App\Domain\Agency\AgencyException;
+use App\Domain\Chat\ChatException;
 use App\Domain\Cms\CmsException;
 use App\Domain\Economy\EconomyException;
 use App\Domain\Events\EventException;
 use App\Domain\Moderation\ModerationException;
 use App\Domain\Reports\ReportException;
 use App\Domain\Rooms\RoomException;
+use App\Domain\Social\SocialException;
 use App\Domain\Store\LevelException;
 use App\Domain\Support\SupportException;
 use App\Domain\Users\SanctionException;
@@ -19,6 +21,7 @@ use App\Http\Middleware\EnforceIdleTimeout;
 use App\Http\Middleware\EnsureAdminActive;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\EnsureRole;
+use App\Http\Middleware\EnsureUserActive;
 use App\Support\ApiResponse;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -38,6 +41,15 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // docs/01 §4 — Reverb, Pusher protocol. `/broadcasting/auth` has to answer **both**
+    // consumers: the Flutter app subscribing to `user.*`, `post.*` and `conversation.*`,
+    // and the Vue panel subscribing to `admin.*`. The guard list only decides who is
+    // recognised; the per-channel callbacks in routes/channels.php decide what they may
+    // hear, and those are what keep the two apart.
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        attributes: ['middleware' => ['auth:sanctum,sanctum-admin']],
+    )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->api(prepend: [
             AttachRequestId::class,
@@ -55,6 +67,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'role'         => EnsureRole::class,
             'admin.active' => EnsureAdminActive::class,
             'admin.idle'   => EnforceIdleTimeout::class,
+            // The mobile group's counterpart to admin.active — docs/03 §"Two consumers".
+            'user.active'  => EnsureUserActive::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
@@ -110,6 +124,14 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (LevelException $e, Request $request) {
+            return $request->expectsJson() || $request->is('api/*') ? $e->render() : null;
+        });
+
+        $exceptions->render(function (SocialException $e, Request $request) {
+            return $request->expectsJson() || $request->is('api/*') ? $e->render() : null;
+        });
+
+        $exceptions->render(function (ChatException $e, Request $request) {
             return $request->expectsJson() || $request->is('api/*') ? $e->render() : null;
         });
 

@@ -47,6 +47,15 @@ return [
             'driver' => 'sanctum',
             'provider' => 'admin_users',
         ],
+
+        // The Flutter app. Named `sanctum` because that is what `auth:sanctum` resolves to
+        // and what docs/03 writes on every mobile route. Pinned to the `users` provider, so
+        // an admin token presented on a mobile route resolves to nobody rather than to an
+        // admin — the token guard is the only thing standing between the two consumers.
+        'sanctum' => [
+            'driver' => 'sanctum',
+            'provider' => 'users',
+        ],
     ],
 
     /*

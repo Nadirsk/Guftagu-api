@@ -363,16 +363,17 @@ fairness, which matters when real money bought the entry.
 | Table | Key columns |
 |---|---|
 | `follows` | `follower_id`, `following_id`, `created_at`. Unique pair; indexed both directions |
-| `friendships` | `user_id`, `friend_id`, `status` (`pending` `accepted` `blocked`), `requested_by`, `accepted_at`. Unique pair |
+| `friendships` | `user_id`, `friend_id`, `status` (`pending` `accepted` `blocked`), `requested_by`, `accepted_at`. Unique pair, **stored low-id-first** — without that rule A→B and B→A are two rows and "are we friends" can answer twice |
 | `blocks` | `blocker_id`, `blocked_id`, `reason`. Unique pair — D.9c |
 | `conversations` | `uuid`, `type` (`direct` `group`), `title`, `avatar_url`, `created_by`, `last_message_at`, `is_active` |
 | `conversation_participants` | `conversation_id`, `user_id`, `role`, `joined_at`, `left_at`, `last_read_message_id`, `is_muted`, `unread_count` |
-| `messages` | `uuid`, `conversation_id`, `sender_id`, `type` (`text` `image` `audio` `video` `gift` `system`), `body`, `media_url`, `media_meta` JSON, `reply_to_id`, `is_deleted`, `deleted_for` JSON, `created_at`. **Monthly partitions** |
-| `message_reads` | `message_id`, `user_id`, `read_at` |
-| `posts` | `uuid`, `user_id`, `type` (`text` `image` `audio`), `body`, `media_urls` JSON, `visibility` (`public` `followers` `private`), `like_count`, `comment_count`, `is_hidden`, `hidden_by` — D.3d, **descope lever #1** |
-| `post_likes` | `post_id`, `user_id`. Unique pair |
-| `post_comments` | `post_id`, `user_id`, `parent_id`, `body`, `is_deleted` |
-| `user_visits` | `visitor_id`, `profile_id`, `visited_at` — profile-visitor list |
+| `messages` | `uuid`, `conversation_id`, `sender_id`, `type` (`text` `image` `audio` `video` `gift` `system`), `body`, `media_url`, `media_meta` JSON, `reply_to_id`, `is_deleted` (for everyone), `deleted_for` JSON (for these user ids only), `created_at`. **Monthly partitions** — *not yet applied: MySQL 8 cannot partition a table with foreign keys, and the FKs are worth more until volume says otherwise* |
+| `message_reads` | `message_id`, `user_id`, `read_at`. Unique pair |
+| `posts` | `uuid`, `user_id`, `type` (`text` `image` `audio`), `body`, `media_urls` JSON, `visibility` (`public` `followers` `private`), `like_count`, `comment_count`, `is_hidden`, `hidden_by`, `hidden_reason`, soft deletes — D.3d, **descope lever #1** |
+| `post_likes` | `post_id`, `user_id`. Unique pair — the index *is* the idempotency, so a double tap cannot double-count |
+| `post_comments` | `uuid`, `post_id`, `user_id`, `parent_id`, `body`, `is_deleted`. Addressed by uuid (docs/03 §2.4) but ordered by `id`: a thread reads in insertion order and a uuid does not sort |
+| `user_visits` | `visitor_id`, `profile_id`, `visit_count`, `visited_at` — profile-visitor list. Unique pair, bumped per visit; a row per view makes the list "the same person forty times" instead of a list of people |
+| `search_histories` | `uuid`, `user_id`, `type` (`term` `user` `room`), `term`, `target_uuid`, `searched_at`. Unique (`user_id`,`type`,`term`) so a repeat search moves the row up rather than duplicating it; trimmed to the newest 20 — D.3a |
 
 ---
 

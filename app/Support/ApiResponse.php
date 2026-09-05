@@ -52,6 +52,21 @@ class ApiResponse
         ]);
     }
 
+    /**
+     * Cursor pagination, for feeds and chat (docs/03 §2.3).
+     *
+     * The cursor is opaque on purpose — {@see Cursor} wraps the last row's id. Handing the
+     * client a bare id invites arithmetic on it, and the moment ordering is anything but
+     * the primary key that arithmetic is wrong.
+     */
+    public static function cursor(array $items, ?string $nextCursor, string $message = 'OK'): JsonResponse
+    {
+        return static::success($items, $message, 200, [
+            'next_cursor' => $nextCursor,
+            'has_more'    => $nextCursor !== null,
+        ]);
+    }
+
     protected static function meta(array $extra = []): array
     {
         return array_merge([

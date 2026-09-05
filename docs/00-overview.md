@@ -45,13 +45,17 @@ The commercial thesis, per SLA §1:
 
 | Surface | Stack | Audience | Notes |
 |---|---|---|---|
-| Mobile app | Flutter (Android + iOS) | User / Player / Host | The only mobile app in V1 |
+| Mobile app | React Native (Android + iOS) | User / Player / Host | The only mobile app in V1 |
 | Admin panel | Vue 3 web | Super Admin, Admin, Manager, Moderator | Responsive; usable on tablet |
 | API & realtime | Laravel 12 | — | REST + WebSocket |
 
 > **DEV-01.** The SLA describes a separate Moderator mobile application. It is **not** being built.
 > Moderation lives in the admin panel as a permission-gated role. See
 > [ROADMAP §6](../ROADMAP.md#6-scope-deviations-from-the-signed-sla).
+>
+> **CR-01.** The SLA specifies Flutter for the mobile app. It is being built in **React
+> Native** on client direction. Nothing about the API, the realtime protocol or the feature
+> scope changes — only the client toolchain. Same reference.
 
 ---
 

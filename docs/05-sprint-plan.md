@@ -19,7 +19,7 @@ The contracted shape is 2 developers (SLA §11). Their loads under that shape:
 | Who | Focus | Load from [04](04-epic-backlog.md) | Working days |
 |---|---|---:|---:|
 | **Dev A** | Laravel API, database, realtime, integrations, infrastructure | 1,081 h (BE + RT + INF) | **135** |
-| **Dev B** | Flutter app **and** Vue admin panel | 770 h (APP + WEB) | **96** |
+| **Dev B** | React Native app **and** Vue admin panel | 770 h (APP + WEB) | **96** |
 | Shared | QA authoring, documentation | 71 h | 9 |
 | PM / BA | Client calls (2–3/week), scope control, UAT coordination | — | part-time |
 | Designer | M1 Figma, then on call for asset delivery | — | M1 + ad hoc |
@@ -236,7 +236,7 @@ and host management · FCM notifications, reports and audit logs
 mute, kick, ban, action reports, escalate · every action lands in `moderation_logs` and `audit_logs` ·
 agency settlement runs end to end · push notifications arrive on both platforms.
 
-> This milestone was 6 days for an entire second Flutter app plus all of this. DEV-01 is what makes it
+> This milestone was 6 days for an entire second mobile app plus all of this. DEV-01 is what makes it
 > achievable. Had the Moderator app stayed, M6 would be the schedule's failure point.
 
 ---
@@ -291,7 +291,7 @@ if M3 slips. That is the main parallelisation option ([§10](#10-parallelisation
 
 ## 6. Buffer accounting
 
-DEV-01 removes the Moderator Flutter app from M6. Recovered effort is **not** absorbed silently:
+DEV-01 removes the Moderator mobile app from M6. Recovered effort is **not** absorbed silently:
 
 | Source | Recovered | Allocated to |
 |---|---|---|
@@ -341,7 +341,7 @@ Likelihood and impact: **H**igh / **M**edium / **L**ow.
 
 | | |
 |---|---|
-| **Risk** | Dev B builds both the Flutter app (401 h) and the Vue admin panel (369 h) — 770 hours across two toolchains, two design languages, two review cycles, with constant context switching. |
+| **Risk** | Dev B builds both the React Native app (401 h) and the Vue admin panel (369 h) — 770 hours across two toolchains, two design languages, two review cycles, with constant context switching. |
 | **L / I** | **H / M** |
 | **Where it bites** | M3 (room screen + admin room screens in the same 10 days) and M6 (moderation console + FCM app work in 6 days). |
 | **Mitigation** | Vue screens are assembled from Element Plus rather than hand-built, so the admin panel is assembly not design. Admin work is scheduled on days Dev A is heads-down in backend, so review latency does not compound. |
@@ -428,7 +428,7 @@ Likelihood and impact: **H**igh / **M**edium / **L**ow.
 
 | Option | What it means | Result |
 |---|---|---|
-| **1. Add developers** | Go to 5 developers (2 backend, 1 Flutter, 1 Vue, 1 shared QA/backend) for M2–M6 | Closest to the contracted 53 days. Parallelism has coordination overhead, so budget ~60–65 days realistically. **Recommended.** |
+| **1. Add developers** | Go to 5 developers (2 backend, 1 React Native, 1 Vue, 1 shared QA/backend) for M2–M6 | Closest to the contracted 53 days. Parallelism has coordination overhead, so budget ~60–65 days realistically. **Recommended.** |
 | **2. Extend the timeline** | Keep 2 developers | ≈120 working days ≈ 5.5 months. Honest, low-risk, but a very different commercial commitment. |
 | **3. Reduce V1** | Ship a genuine MVP in 53 days with 2 developers | See the cut below. Requires a signed revision to the scope, not a descope lever. |
 | ~~4. Compress by working harder~~ | — | **Not an option.** A 2.3× compression is delivered by cutting testing, review and hardening — precisely the M7 activities that protect money and user safety. Say no to this one explicitly. |

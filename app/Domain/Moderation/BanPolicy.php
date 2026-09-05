@@ -2,9 +2,9 @@
 
 namespace App\Domain\Moderation;
 
+use App\Domain\Access\Services\PermissionCache;
 use App\Domain\Access\Services\PermissionResolver;
 use App\Models\AdminUser;
-use Illuminate\Support\Facades\Cache;
 
 /**
  * GFT-171 / C.4b — how long a given moderator is allowed to ban somebody for.
@@ -28,7 +28,7 @@ class BanPolicy
 {
     public const SCOPE_KEY = 'max_ban_hours';
 
-    protected const TTL = 300;
+    protected const TTL = PermissionCache::TTL;
 
     public function __construct(protected PermissionResolver $resolver)
     {
@@ -48,9 +48,12 @@ class BanPolicy
             return null;
         }
 
-        return Cache::tags(["perm:{$admin->id}"])->remember(
-            "ban_cap:{$admin->id}",
-            self::TTL,
+        // The same per-admin namespace the permission set lives in, so revoking or
+        // re-scoping a grant clears the cap with it. A stale 30-day ceiling outliving the
+        // grant that set it is exactly the failure the shared namespace prevents.
+        return app(PermissionCache::class)->remember(
+            $admin->id,
+            'ban_cap',
             function () use ($admin) {
                 $caps = [];
 

@@ -32,6 +32,16 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\UserWalletController;
 use App\Http\Controllers\Admin\VipTierController;
 use App\Http\Controllers\Admin\WithdrawalController;
+use App\Http\Controllers\Api\BlockController;
+use App\Http\Controllers\Api\ConversationController;
+use App\Http\Controllers\Api\FollowController;
+use App\Http\Controllers\Api\FriendController;
+use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\PostCommentController;
+use App\Http\Controllers\Api\PostController;
+use App\Http\Controllers\Api\SearchController;
+use App\Http\Controllers\Api\VisitorController;
+use App\Models\User;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -43,12 +53,94 @@ use Illuminate\Support\Facades\Route;
 |   /api/v1/…         Flutter app    auth:sanctum + user.active
 |   /api/v1/admin/…   Vue panel      auth:sanctum-admin + permission:…
 |
-| Only the admin group exists so far — the mobile group lands with epic D.1.
+| The mobile group below covers epics D.3 (social graph, search, moments), D.4 (messaging)
+| and D.9c (blocks). **Token issuance is not here** — OTP login lands with D.1; until then
+| a token is obtained through `Sanctum::actingAs` in tests or minted by hand in tinker.
 |
 | Every admin route carries an explicit permission. The default is deny: a route with
 | no `permission:` middleware is reachable by any authenticated admin, so anything
 | beyond self-service must name its key.
+|
+| Mobile routes carry no permission keys — there are no roles in the app. What gates them
+| is ownership and the block graph, enforced in the domain services rather than in
+| middleware, because "may I see this post" depends on the post.
 */
+
+/*
+|--------------------------------------------------------------------------
+| Mobile — social, moments, search and chat (epics D.3, D.4, D.9c)
+|--------------------------------------------------------------------------
+| docs/03 §8. Identifiers are uuids throughout (docs/03 §2.4); `{profile}` is bound to a
+| User by uuid just below, since the model's own route key stays numeric for the admin
+| routes that address users by id.
+*/
+
+Route::bind('profile', fn (string $value) => User::where('uuid', $value)->firstOrFail());
+
+Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 'throttle:mobile-api'])->group(function () {
+
+    // ---- search (D.3a). Its own throttle — docs/03 §16 caps search at 30/min/user.
+    Route::middleware('throttle:search')->group(function () {
+        Route::get('search', [SearchController::class, 'index'])->name('search');
+    });
+
+    // Static segments before any wildcard, or `history` resolves as a history uuid.
+    Route::get('search/history', [SearchController::class, 'history'])->name('search.history');
+    Route::post('search/history', [SearchController::class, 'storeHistory'])->name('search.history.store');
+    Route::delete('search/history', [SearchController::class, 'clearHistory'])->name('search.history.clear');
+    Route::delete('search/history/{uuid}', [SearchController::class, 'destroyHistory'])->name('search.history.destroy');
+
+    // ---- moments (D.3d)
+    Route::get('feed', [PostController::class, 'feed'])->name('feed');
+    Route::post('posts', [PostController::class, 'store'])->name('posts.store');
+    Route::get('posts/{post}', [PostController::class, 'show'])->name('posts.show');
+    Route::delete('posts/{post}', [PostController::class, 'destroy'])->name('posts.destroy');
+    Route::post('posts/{post}/like', [PostController::class, 'like'])->name('posts.like');
+    Route::delete('posts/{post}/like', [PostController::class, 'unlike'])->name('posts.unlike');
+    Route::get('posts/{post}/comments', [PostCommentController::class, 'index'])->name('posts.comments.index');
+    Route::post('posts/{post}/comments', [PostCommentController::class, 'store'])->name('posts.comments.store');
+    Route::delete('posts/{post}/comments/{comment}', [PostCommentController::class, 'destroy'])
+        ->name('posts.comments.destroy');
+
+    // ---- follow graph, friends, blocks, visitors (D.3b, D.9c)
+    // A friend is a mutual follow, so there is no request/accept flow to route: adding a
+    // friend is `POST /users/{uuid}/follow`, removing one is the matching DELETE.
+    Route::get('friends', [FriendController::class, 'index'])->name('friends.index');
+
+    Route::get('blocks', [BlockController::class, 'index'])->name('blocks.index');
+
+    Route::post('users/{profile}/follow', [FollowController::class, 'follow'])->name('users.follow');
+    Route::delete('users/{profile}/follow', [FollowController::class, 'unfollow'])->name('users.unfollow');
+    Route::get('users/{profile}/followers', [FollowController::class, 'followers'])->name('users.followers');
+    Route::get('users/{profile}/following', [FollowController::class, 'following'])->name('users.following');
+    Route::post('users/{profile}/block', [BlockController::class, 'store'])->name('users.block');
+    Route::delete('users/{profile}/block', [BlockController::class, 'destroy'])->name('users.unblock');
+    Route::post('users/{profile}/visit', [VisitorController::class, 'store'])->name('users.visit');
+    Route::get('users/{profile}/visitors', [VisitorController::class, 'index'])->name('users.visitors');
+    Route::get('users/{profile}/posts', [PostController::class, 'forUser'])->name('users.posts');
+
+    // ---- messaging (D.4)
+    Route::get('conversations', [ConversationController::class, 'index'])->name('conversations.index');
+    Route::post('conversations', [ConversationController::class, 'store'])->name('conversations.store');
+    Route::get('conversations/{conversation}', [ConversationController::class, 'show'])->name('conversations.show');
+    Route::post('conversations/{conversation}/read', [ConversationController::class, 'read'])->name('conversations.read');
+    // Delivery receipts — the second tick. `delivered` is per thread, called when a
+    // `message.new` frame lands; `messages/delivered` is the app-resume sweep over all of
+    // them. Static segment first, or `messages` would resolve as a conversation uuid.
+    Route::post('messages/delivered', [ConversationController::class, 'deliveredAll'])->name('messages.delivered');
+    Route::post('conversations/{conversation}/delivered', [ConversationController::class, 'delivered'])->name('conversations.delivered');
+    Route::post('conversations/{conversation}/mute', [ConversationController::class, 'mute'])->name('conversations.mute');
+    Route::post('conversations/{conversation}/typing', [ConversationController::class, 'typing'])->name('conversations.typing');
+    Route::post('conversations/{conversation}/leave', [ConversationController::class, 'leave'])->name('conversations.leave');
+    Route::get('conversations/{conversation}/messages', [MessageController::class, 'index'])->name('conversations.messages.index');
+    Route::delete('conversations/{conversation}/messages/{message}', [MessageController::class, 'destroy'])
+        ->name('conversations.messages.destroy');
+
+    // Sending is throttled harder than reading — docs/03 §16, "DM send 30/min/user".
+    Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])
+        ->middleware('throttle:dm-send')
+        ->name('conversations.messages.store');
+});
 
 Route::prefix('v1')->group(function () {
     Route::prefix('admin')->name('admin.')->group(function () {

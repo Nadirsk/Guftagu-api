@@ -16,7 +16,7 @@ from that engagement. It ships as:
 
 | Surface | Stack | Users |
 |---|---|---|
-| **Mobile app** | Flutter (Android + iOS) | User / Player / Host |
+| **Mobile app** | React Native (Android + iOS) | User / Player / Host |
 | **Admin panel** | Vue 3 (web) | Super Admin, Admin, Manager, Moderator |
 | **API + realtime** | Laravel 12 (PHP 8.2+), MySQL 8, Redis 7 | — |
 
@@ -24,6 +24,10 @@ from that engagement. It ships as:
 > §10 M6) and scopes C.1 as *"web and mobile"*. **This is dropped on client direction.** Moderation is
 > delivered entirely inside the admin panel as a permission-gated role. See
 > [§6 Scope deviations](#6-scope-deviations-from-the-signed-sla).
+>
+> **Change Request, confirmed (CR-01):** the SLA specifies *Flutter* (§7). The mobile app is built in
+> **React Native** on client direction. Feature scope, API contract and realtime protocol are
+> unaffected; the M3 and M4 risk notes in [§6](#cr-01--what-the-switch-actually-costs) are not.
 
 ---
 
@@ -37,7 +41,7 @@ development is unambiguous. Any change to this table is a Change Request.
 |---|---|---|---|
 | 1 | Admin web | Vue.js | **Vue 3 + Vite + TypeScript + Pinia + Tailwind + Element Plus** |
 | 2 | Backend API | Laravel (PHP) | **Laravel 12, PHP 8.2+ (8.3 in production), Sanctum, Horizon, Reverb** |
-| 3 | Mobile | Flutter | **Flutter 3.2x, Dart 3, Riverpod, go_router** |
+| 3 | Mobile | Flutter | **React Native 0.7x, TypeScript 5, Zustand + TanStack Query, React Navigation 6** — bare CLI, not Expo Go (`react-native-agora` needs native modules). Changed from Flutter by **CR-01** |
 | 4 | Database | MySQL / Supabase | **MySQL 8.0** (system of record) + **Redis 7** (hot state, queues) |
 | 5 | Repository | GitHub private | **Single private monorepo**, branch protection on `main` + `develop` |
 | 6 | Hosting | DigitalOcean | **DO Droplets + Managed MySQL + Managed Redis + Spaces + LB** |
@@ -56,7 +60,7 @@ Guftagoo/
 ├── docs/               ← the executable specification (read in order)
 ├── backend/            ← Laravel 12 API + realtime + admin BFF
 ├── admin-web/          ← Vue 3 admin panel
-└── mobile/             ← Flutter user app
+└── mobile/             ← React Native user app
 ```
 
 ---
@@ -207,11 +211,33 @@ Recorded here so nothing is silently dropped and nothing can be raised as undeli
 
 | # | SLA says | Delivered as | Reason | Effect |
 |---|---|---|---|---|
-| **DEV-01** | "Dedicated Moderator application" (§1); Flutter "User **& Moderator**" (§7); C.1 "web **and mobile**"; "Moderator application" as an M6 deliverable (§10) | Moderator is a **role inside the Vue admin panel**, access driven by granted permissions. No second Flutter app. | Client direction | −3 to −4 days in M6, reallocated as buffer to M3/M4. All C.1–C.5 stories still delivered, on web. |
+| **CR-01** | "Flutter" as the mobile framework (§7); ROADMAP §2 row 3 | **React Native 0.7x + TypeScript** (bare CLI, not Expo Go). Same feature scope, same API contract, same realtime protocol — only the client toolchain changes. | Client direction | Estimates unchanged on paper; see the note below before treating that as free. |
+| **DEV-01** | "Dedicated Moderator application" (§1); a "User **& Moderator**" mobile app (§7); C.1 "web **and mobile**"; "Moderator application" as an M6 deliverable (§10) | Moderator is a **role inside the Vue admin panel**, access driven by granted permissions. No second mobile app. | Client direction | −3 to −4 days in M6, reallocated as buffer to M3/M4. All C.1–C.5 stories still delivered, on web. |
 | **DEV-02** | "Agora (with **optional Zoom SDK**)" (§7) | Agora only | "Optional" in the SLA | None. Zoom is a CR if wanted. |
 | **DEV-03** | "MySQL **/ Supabase**" (§7) | MySQL 8 + Redis 7 | Native Laravel fit; single vendor | None |
 | **DEV-04** | D.3d activity feed / moments "**(as applicable)**" | In scope, but flagged as descope lever #1 if M5 slips | SLA hedge | Only if invoked; requires written client agreement |
 | **DEV-05** | D.5c "**optional** beauty filters" | Agora basic beautification only; no third-party beauty SDK | "Optional" in the SLA | None |
+
+### CR-01 — what the switch actually costs
+
+Nothing in the backend changes. The API contract, the Reverb channels and the whole of
+[03](docs/03-api-contract.md) are transport-agnostic and were never Flutter-specific. The
+**APP** column in [05 §Ownership](docs/05-sprint-plan.md) is where the risk sits, and it is
+worth being honest rather than restating 401 hours as though nothing happened:
+
+| Area | Effect of the switch |
+|---|---|
+| Screens, forms, lists, navigation | Roughly neutral. Different idioms, comparable effort. |
+| **Live audio room (M3)** | **The risk.** `react-native-agora` is a thinner, less-travelled binding than `agora_rtc_engine`, and M3 is already flagged as [R-02](docs/05-sprint-plan.md#r-02--m3-realtime-complexity), the highest-risk milestone. Budget the spike, do not assume parity. |
+| Gift animations (SVGA) | Lottie is first-class in RN; **SVGA is not** — there is no maintained RN package. Either a native module is written per platform, or SVGA assets are converted to Lottie. Decide before M4, not during it. |
+| Realtime | Slightly easier: `laravel-echo` + `pusher-js` is the reference client for Reverb, and is better documented than the Flutter Pusher binding. |
+| Build and release | Two native toolchains instead of one abstraction over them. iOS release builds need a macOS runner. |
+
+**Two open items this creates**, both needing a decision before the milestone that hits them:
+
+1. **SVGA** — native module or convert the assets to Lottie? (Blocks M4, gift animations.)
+2. **Agora spike** — a two-device audio-room proof on `react-native-agora` before M3 planning
+   is committed. This is the cheapest place to find out if the binding fights back.
 
 ---
 

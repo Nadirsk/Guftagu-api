@@ -55,5 +55,31 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('api', function (Request $request) {
             return Limit::perMinute(120)->by($request->user()?->id ?: $request->ip());
         });
+
+        // docs/03 §16 — the mobile limits. Each is keyed on the user id when there is one
+        // and the IP otherwise, so an anonymous caller cannot spend somebody else's budget
+        // and a signed-in one cannot escape their own by changing networks.
+        RateLimiter::for('mobile-api', function (Request $request) {
+            return Limit::perMinute(120)->by($this->actorKey($request));
+        });
+
+        // "DM send — 30 / min / user". Far below mobile-api on purpose: this is the one
+        // mobile endpoint that puts a notification on somebody else's phone every call.
+        RateLimiter::for('dm-send', function (Request $request) {
+            return Limit::perMinute(30)->by($this->actorKey($request));
+        });
+
+        // "Search — 30 / min / user". It runs LIKE scans over rooms plus a hash lookup per
+        // candidate phone format, which makes it the most expensive read in the app.
+        RateLimiter::for('search', function (Request $request) {
+            return Limit::perMinute(30)->by($this->actorKey($request));
+        });
+    }
+
+    protected function actorKey(Request $request): string
+    {
+        return $request->user()?->id
+            ? 'user:'.$request->user()->id
+            : 'ip:'.$request->ip();
     }
 }

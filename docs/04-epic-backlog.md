@@ -16,7 +16,7 @@ the SLA's own story lettering, so this document doubles as the UAT script
 |---|---|
 | **BE** | Laravel API, jobs, migrations |
 | **WEB** | Vue admin panel |
-| **APP** | Flutter mobile app |
+| **APP** | React Native mobile app |
 | **RT** | Realtime — Reverb channels, Redis state, Agora |
 | **INF** | Infrastructure, CI/CD, third-party setup |
 | **QA** | Test authoring |
@@ -38,7 +38,7 @@ By layer:
 | Layer | Tickets | Hours |
 |---|---:|---:|
 | BE — backend | 203 | 1,016 |
-| APP — Flutter | 59 | 401 |
+| APP — React Native | 59 | 401 |
 | WEB — Vue admin | 62 | 369 |
 | QA | 10 | 67 |
 | RT — realtime | 9 | 47 |
@@ -1347,7 +1347,7 @@ integration-level tickets:
 |---|---|---:|---|---|
 | GFT-342 | BE | 4h | — | `translations` table, locale resolution from `Accept-Language`, API for the panel |
 | GFT-343 | BE | 4h | 342 | Bilingual content columns across gifts, categories, events, CMS, notifications |
-| GFT-344 | APP | 5h | 342 | ARB localisation, language switch, RTL-safe layouts for future extension |
+| GFT-344 | APP | 5h | 342 | i18next resource bundles, language switch, RTL-safe layouts for future extension |
 | GFT-345 | WEB | 5h | 342 | `vue-i18n` setup, locale switcher, translated admin strings |
 | GFT-346 | WEB | 6h | 345 | Responsive admin — tablet and mobile breakpoints for every screen |
 | GFT-347 | APP | 5h | 344 | Accessibility — semantic labels, contrast, touch targets, text scaling |
@@ -1358,7 +1358,7 @@ integration-level tickets:
 
 - **E.5a** Given Hindi is selected, then every user-facing string — including gift names, event titles
   and push notifications — renders in Hindi, with a documented fallback to English for any missing key.
-- **E.5a** Given a third language is added, then only translation rows and ARB files are needed — no
+- **E.5a** Given a third language is added, then only translation rows and i18next resource bundles are needed — no
   code change. Demonstrated by adding one string in a dummy locale.
 - **E.5b** Given a 768 px viewport, then every admin screen is usable without horizontal scrolling.
 - **E.5c** Given a WCAG 2.1 AA audit, then contrast, focus order, labels and touch-target size pass on

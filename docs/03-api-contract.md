@@ -10,7 +10,7 @@ Two consumers, two route groups, two middleware stacks:
 
 | Group | Prefix | Consumer | Guard |
 |---|---|---|---|
-| **Mobile** | `/api/v1/…` | Flutter app | `auth:sanctum` + `user.active` |
+| **Mobile** | `/api/v1/…` | React Native app | `auth:sanctum` + `user.active` |
 | **Admin** | `/api/v1/admin/…` | Vue panel | `auth:sanctum-admin` + `permission:…` |
 
 ---
@@ -309,19 +309,37 @@ Failure modes: `INSUFFICIENT_BALANCE` (402) · `GIFT_UNAVAILABLE` (409) · `VIP_
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/search` | `?q=&type=users\|rooms\|all` (D.3a) |
+| GET | `/search` | `?q=&type=users\|rooms\|all&limit=&remember=` (D.3a). Minimum 2 characters; a blocked person is not findable. Own throttle, 30/min |
+| GET | `/search/history` | The caller's recent searches, newest first, capped at 20 |
+| POST | `/search/history` | `{term, type?: term\|user\|room, target_uuid?}` — re-searching a term moves it up rather than duplicating it |
+| DELETE | `/search/history` | Clear all |
+| DELETE | `/search/history/{uuid}` | Remove one entry |
 | GET | `/discover/recommendations` | Rooms and people, from follow graph + activity |
-| POST | `/users/{uuid}/follow` · DELETE | Follow / unfollow (D.3b) |
-| GET | `/users/{uuid}/followers` · `/following` | |
-| GET | `/friends` · POST `/friends/{uuid}/request` · POST `/friends/{uuid}/accept` | |
-| GET | `/users/{uuid}/visitors` | Profile visitors |
-| GET | `/feed` · POST `/posts` · POST `/posts/{uuid}/like` · POST `/posts/{uuid}/comments` | D.3d — **descope lever #1** |
+| POST | `/users/{uuid}/follow` · DELETE | Follow / unfollow (D.3b). Idempotent; both responses carry `follower_count` and `following_count` |
+| GET | `/users/{uuid}/followers` · `/following` | Offset-paginated; each row carries `is_following` for the follow-back button |
+| GET | `/friends` · POST `/friends/{uuid}/request` · POST `/friends/{uuid}/accept` | `request` doubles as an accept when the other side asked first |
+| GET | `/friends/requests` | Requests waiting on the caller's answer, not the ones they sent |
+| DELETE | `/friends/{uuid}` | Unfriend — also how a pending request is declined |
+| POST | `/users/{uuid}/visit` | Record a profile view. A POST, not a side effect of `GET /users/{uuid}`: a GET that writes cannot be retried, prefetched or cached |
+| GET | `/users/{uuid}/visitors` | Profile visitors. Own list only; one row per visitor with `visit_count` |
+| GET | `/feed` | `?scope=following\|public&cursor=&limit=` — D.3d, **descope lever #1** |
+| GET | `/users/{uuid}/posts` | One person's moments, filtered to what the caller may see |
+| POST | `/posts` | `{type, body, media_urls[], visibility: public\|followers\|private}`. Banned-word checked |
+| GET | `/posts/{uuid}` · DELETE | A `followers`-only post 404s for a non-follower — never 403, which would confirm it exists |
+| POST | `/posts/{uuid}/like` · DELETE | Idempotent; the response carries the authoritative `like_count` |
+| GET | `/posts/{uuid}/comments` | Cursor-paginated, oldest first |
+| POST | `/posts/{uuid}/comments` | `{body, parent_uuid?}` — replies are one level deep |
+| DELETE | `/posts/{uuid}/comments/{uuid}` | Comment author or post author. Tombstoned, not removed, so replies keep their place |
 | GET | `/conversations` | DM list with unread counts |
-| POST | `/conversations` | Start a direct or group conversation |
-| GET | `/conversations/{uuid}/messages` | Cursor-paginated |
-| POST | `/conversations/{uuid}/messages` | `{type, body, media}` — blocked-user checked |
+| POST | `/conversations` | `{user_uuid}` for a direct thread (find-or-create), `{title, member_uuids[]}` for a group |
+| GET | `/conversations/{uuid}` | One thread's header — participants, last message, the caller's own unread count |
+| GET | `/conversations/{uuid}/messages` | Cursor-paginated, newest first |
+| POST | `/conversations/{uuid}/messages` | `{type, body, media_url, media_meta, reply_to_uuid}` — blocked-user checked; the reply target must be in the same thread. Own throttle, 30/min |
+| DELETE | `/conversations/{uuid}/messages/{uuid}` | `?for_everyone=1` is the sender's privilege; without it the message is hidden for the caller only |
 | POST | `/conversations/{uuid}/read` | Mark read |
-| POST | `/conversations/{uuid}/mute` | |
+| POST | `/conversations/{uuid}/mute` | `{muted}` — silences the push, not the delivery |
+| POST | `/conversations/{uuid}/typing` | `{typing}` — broadcast only, never persisted |
+| POST | `/conversations/{uuid}/leave` | |
 | GET | `/notifications` | In-app centre (E.2d) |
 | POST | `/notifications/read-all` | |
 | GET | `/notifications/unread-count` | |
@@ -556,6 +574,12 @@ SLA's "approves high-risk actions such as … large payouts". The threshold live
 Reverb, Pusher protocol. Channel authorisation goes through the same permission gate as HTTP
 ([01 §4.3](01-architecture.md#43-channel-taxonomy)).
 
+`POST /broadcasting/auth` answers **both** consumers — `auth:sanctum,sanctum-admin` — because
+the app and the panel share one endpoint. Every callback therefore checks the *type* of the
+authenticated party, not only their id: the two tables have separate id spaces, and an
+id-only comparison would hand an admin the private channel of the app user who shares their
+row number.
+
 ### `room.{uuid}` — presence
 
 | Event | Payload |
@@ -579,9 +603,55 @@ Reverb, Pusher protocol. Channel authorisation goes through the same permission 
 
 ### `user.{uuid}` — private
 
+Everything addressed to one person. Authorised on the uuid, never the numeric id.
+
 `call.incoming` · `call.accepted` · `call.declined` · `call.ended` · `notification.new` ·
-`wallet.updated` · `follow.new` · `message.new` · `sanction.applied` · `vip.expired` ·
-`withdrawal.status` · `host.approved`
+`wallet.updated` · `follow.new` · `follow.removed` · `message.new` · `post.created` ·
+`post.liked` · `post.unliked` · `post.commented` · `visitor.new` · `sanction.applied` ·
+`vip.expired` · `withdrawal.status` · `host.approved`
+
+| Event | Payload |
+|---|---|
+| `follow.new` · `follow.removed` | `{follower, following, followed, counts{followers_of_following, following_of_follower}}` |
+| `visitor.new` | `{visitor}` — fired on a *first* visit only, never a repeat |
+| `post.created` | `{post}` — only for a `followers`-only post, fanned out to each follower |
+| `message.new` | `{conversation_uuid, message}` — so the DM badge moves without the thread being open |
+
+### `post.{uuid}` — private, same visibility rule as `GET /posts/{uuid}`
+
+A moment's live thread. Channel authorisation runs the same clause the REST endpoint does,
+so a `followers`-only post cannot be watched by a non-follower — D.3d's "cannot see it via
+the feed **or** by direct id" is worth little if the socket is a third way in.
+
+| Event | Payload |
+|---|---|
+| `post.liked` · `post.unliked` | `{post_uuid, actor, liked, like_count}` |
+| `post.commented` | `{post_uuid, comment, comment_count}` |
+| `post.comment.deleted` | `{post_uuid, comment_uuid, comment_count}` |
+| `post.deleted` | `{post_uuid, author_uuid, reason}` |
+
+### `feed` — public
+
+New public moments, and deletions, for clients holding a feed list. One frame per post
+regardless of audience size — the alternative is a fan-out the size of the user table.
+
+`post.created` · `post.deleted`
+
+### `conversation.{uuid}` — private, participants only
+
+Closed to both sides once either has blocked the other (D.9c). Someone who left the thread
+keeps their history and receives nothing said afterwards.
+
+| Event | Payload |
+|---|---|
+| `message.new` | `{conversation_uuid, message}` |
+| `message.deleted` | `{conversation_uuid, message_uuid}` — "delete for everyone" only |
+| `conversation.read` | `{conversation_uuid, reader, last_read_message_uuid}` |
+| `typing` | `{conversation_uuid, user, typing}` — never persisted |
+
+Chat frames are published synchronously (`ShouldBroadcastNow`); everything else in the
+social module is queued. A queued chat message puts the whole queue depth between "sent"
+and "delivered".
 
 ### `admin.moderation` — private, `moderation.live`
 
@@ -685,7 +755,7 @@ Redis-backed sliding windows. Exceeding a limit returns `429 RATE_LIMITED` with 
 
 - **OpenAPI is generated, not hand-written.** Annotate controllers and Form Requests; CI regenerates
   the spec and fails the build if it drifts from the committed copy (SLA §5.1c).
-- **This document is the contract.** Backend implements it, Flutter and Vue consume it. A change here
+- **This document is the contract.** Backend implements it, React Native and Vue consume it. A change here
   is a change everywhere — no endpoint ships that is not in this file.
 - **Claude Sync.** Per the global instructions, API contracts are shared between backend and frontend
   Claude sessions at `http://api.claudesync.aaibuzz.com/api/claude-sync` — post

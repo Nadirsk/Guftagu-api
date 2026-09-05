@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -135,6 +136,54 @@ class User extends Authenticatable
     public function diamondTransactions(): HasMany
     {
         return $this->hasMany(DiamondTransaction::class)->latest('id');
+    }
+
+    // ------------------------------------------------------- social graph (D.3)
+
+    /** Rows where this user is the follower — i.e. the people they follow. */
+    public function following(): BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'follows', 'follower_id', 'following_id')
+            ->withTimestamps();
+    }
+
+    /** Rows where this user is the one being followed. */
+    public function followers(): BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'follows', 'following_id', 'follower_id')
+            ->withTimestamps();
+    }
+
+    public function posts(): HasMany
+    {
+        return $this->hasMany(Post::class);
+    }
+
+    /** Blocks this user has placed. The reverse direction is its own query — D.9c. */
+    public function blocks(): HasMany
+    {
+        return $this->hasMany(Block::class, 'blocker_id');
+    }
+
+    /** People who opened this user's profile. */
+    public function profileVisits(): HasMany
+    {
+        return $this->hasMany(UserVisit::class, 'profile_id');
+    }
+
+    public function conversationParticipations(): HasMany
+    {
+        return $this->hasMany(ConversationParticipant::class);
+    }
+
+    public function searchHistory(): HasMany
+    {
+        return $this->hasMany(SearchHistory::class)->latest('searched_at');
+    }
+
+    public function isFollowing(int $userId): bool
+    {
+        return $this->following()->whereKey($userId)->exists();
     }
 
     // ------------------------------------------------------------------ scopes

@@ -11,12 +11,12 @@ testing before each release · UAT sign-off before go-live*.
 
 | Level | Tool | Owner | Runs |
 |---|---|---|---|
-| Unit | Pest (PHP), `flutter_test`, Vitest | Author of the code | Every push |
+| Unit | Pest (PHP), Jest, Vitest | Author of the code | Every push |
 | Feature / integration | Pest with a real MySQL + Redis | Author | Every push |
 | API contract | Spectator against the OpenAPI spec | Dev A | Every push |
-| Widget | `flutter_test` | Dev B | Every push |
+| Component | React Native Testing Library (Jest) | Dev B | Every push |
 | E2E — admin | Playwright | Dev B | Nightly + pre-release |
-| E2E — mobile | Patrol / integration_test | Dev B | Pre-release |
+| E2E — mobile | Detox | Dev B | Pre-release |
 | Load | k6 | Dev A | M3 exit, M7 D47 |
 | Security | OWASP ZAP + hand-written suite | Dev A | M7 D48 |
 | Accessibility | axe-core + manual | Dev B | M7 D48 |
@@ -30,7 +30,7 @@ testing before each release · UAT sign-off before go-live*.
 | Access domain (permissions, delegation, guard) | **95%** |
 | Room and realtime domain | 80% |
 | Everything else backend | 70% |
-| Flutter — business logic and repositories | 60% |
+| React Native — hooks, stores and repositories | 60% |
 | Vue — stores and permission guards | 60% |
 
 The two 95% figures are non-negotiable. Money and privilege are the only two places where a bug is
@@ -173,7 +173,7 @@ Maps to E.4 and SLA §5.3. Run at M7 D48, and the escalation suite on every push
 | A03 | Injection | SQLi payloads in every search, filter and sort parameter. XSS payloads in every free-text field, checked at render in both clients. |
 | A04 | Insecure design | Rate limits verified per [03 §16](03-api-contract.md#16-rate-limits). Wallet locking verified by the concurrency suite. |
 | A05 | Misconfiguration | `APP_DEBUG=false` in production, no directory listing, security headers present, default credentials absent. |
-| A06 | Vulnerable components | `composer audit`, `npm audit`, `flutter pub outdated` in CI; build fails on a high-severity advisory. |
+| A06 | Vulnerable components | `composer audit` and `npm audit` (admin **and** mobile) in CI; build fails on a high-severity advisory. |
 | A07 | Auth failures | Lockout after 5 failures. Token reuse after logout → `401`. Device-mismatch revocation. OTP brute force capped. |
 | A08 | Integrity failures | Webhook signature verification tested with a tampered payload. |
 | A09 | Logging failures | Every security event — failed login, escalation attempt, PII view, signature failure — produces a log entry. |
@@ -323,7 +323,7 @@ SLA §5.4b: regression testing before each release.
 | When | What |
 |---|---|
 | Every push | Unit + feature + contract + escalation suite (~6 min) |
-| Nightly on `develop` | Full backend suite + Playwright admin E2E + Flutter widget tests |
+| Nightly on `develop` | Full backend suite + Playwright admin E2E + React Native component tests |
 | Before each milestone demo | Nightly suite + manual smoke of that milestone's features |
 | Before production release | Everything, plus the five critical paths on real devices, plus load L1 and L3 |
 
@@ -382,7 +382,7 @@ A pull request cannot merge unless every one of these passes. Details in
 |---|---|
 | Pint / PSR-12 | Any style violation |
 | ESLint / Prettier | Any lint error |
-| `dart analyze` | Any error or warning |
+| `tsc --noEmit` (mobile + admin) | Any type error |
 | Backend test suite | Any failure |
 | **Escalation suite** | Any failure |
 | **Ledger integrity test** | Any failure |

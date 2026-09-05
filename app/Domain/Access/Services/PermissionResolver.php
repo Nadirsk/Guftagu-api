@@ -5,21 +5,24 @@ namespace App\Domain\Access\Services;
 use App\Models\AdminUser;
 use App\Models\Permission;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 
 /**
  * GFT-115 — the one place a permission set is computed. docs/01 §5.1.
  *
  *     effective = role baseline ∪ direct allows − direct denies
  *
- * Cached per admin under `cache:perm:{id}` for 300 s (docs/02 §16), tagged so a grant,
+ * Cached per admin for 300 s (docs/02 §16) through {@see PermissionCache}, so a grant,
  * revoke or role change flushes exactly one admin's set. Enforcement is therefore
  * immediate on the next request, not eventually consistent — which the A.11 acceptance
  * criteria require ("the cache does not delay enforcement").
  */
 class PermissionResolver
 {
-    public const TTL = 300;
+    public const TTL = PermissionCache::TTL;
+
+    public function __construct(protected PermissionCache $cache)
+    {
+    }
 
     /**
      * @return Collection<int, string>  permission keys
@@ -32,10 +35,10 @@ class PermissionResolver
             return Permission::allKeys();
         }
 
-        return Cache::tags([$this->tag($admin->id)])->remember(
-            $this->key($admin->id),
-            self::TTL,
-            fn () => $this->compute($admin)
+        return $this->cache->remember(
+            $admin->id,
+            'effective',
+            fn () => $this->compute($admin),
         );
     }
 
@@ -161,9 +164,10 @@ class PermissionResolver
         return $this->decodeScope($grant?->pivot->scope);
     }
 
+    /** Clears this admin's permissions *and* their cached scopes and ban cap — one namespace. */
     public function flushFor(int $adminId): void
     {
-        Cache::tags([$this->tag($adminId)])->flush();
+        $this->cache->flush($adminId);
     }
 
     /**
@@ -202,13 +206,4 @@ class PermissionResolver
         return empty($decoded) ? null : $decoded;
     }
 
-    protected function key(int $adminId): string
-    {
-        return "cache:perm:{$adminId}";
-    }
-
-    protected function tag(int $adminId): string
-    {
-        return "perm:{$adminId}";
-    }
 }

@@ -9,7 +9,7 @@
 ```mermaid
 graph TB
     subgraph Clients
-        APP[Flutter App<br/>Android + iOS<br/>User / Host]
+        APP[React Native App<br/>Android + iOS<br/>User / Host]
         WEB[Vue 3 Admin Panel<br/>SuperAdmin · Admin<br/>Manager · Moderator]
     end
 
@@ -120,6 +120,16 @@ Each `Domain/*` folder holds `Models/`, `Services/`, `Actions/`, `Events/`, `Job
 | Realtime | Laravel Echo over Reverb — live rooms, moderation alerts, KPI tiles |
 | i18n | `vue-i18n`, `en` and `hi` |
 | Forms | VeeValidate + Zod schemas mirroring the API's validation |
+| Config | `.env` (`VITE_` prefixed only), typed in `src/vite-env.d.ts`. Every read has a fallback so a checkout with no `.env` still runs |
+
+**The panel is same-origin with the API and has no base URL of its own.** `VITE_API_BASE_URL`
+defaults to the relative `/api/v1`: in development the Vite proxy forwards `/api` to the
+backend, and in production one nginx vhost serves both. That is why there is no CORS
+configuration anywhere in this project, and why setting an absolute URL here is a change
+that requires adding some.
+
+Nothing in `.env` is a secret. It is compiled into the bundle the browser downloads;
+credentials are exchanged for a bearer token at runtime and never built in.
 
 Route definitions carry their required permission, and the sidebar is generated from the same table —
 so a Moderator's navigation is literally the list of things they may do:
@@ -129,31 +139,47 @@ so a Moderator's navigation is literally the list of things they may do:
   meta: { permission: 'reports.view', title: 'nav.reports' } }
 ```
 
-### 2.3 Flutter app (`mobile/`)
+### 2.3 React Native app (`mobile/`)
+
+> **CR-01.** The SLA and ROADMAP §2 originally resolved the mobile stack to Flutter. It is
+> **React Native** on client direction — see
+> [ROADMAP §6](../ROADMAP.md#6-scope-deviations-from-the-signed-sla).
 
 | Concern | Implementation |
 |---|---|
-| Framework | Flutter 3.2x, Dart 3, Material 3 |
-| State | Riverpod 2 |
-| Routing | go_router with auth and onboarding redirects |
-| Networking | Dio + Retrofit-style typed clients, generated from the API contract |
-| Models | `freezed` + `json_serializable` |
-| Realtime | `pusher_channels_flutter` against Reverb |
-| RTC | `agora_rtc_engine` |
-| Local | `flutter_secure_storage` (tokens), Hive (cache), `shared_preferences` (settings) |
-| Animation | Lottie + SVGA for gifts and entrance effects |
-| Push | `firebase_messaging` + `flutter_local_notifications` |
-| i18n | `flutter_localizations` + ARB, `en` and `hi` |
+| Framework | React Native 0.7x, React 18, TypeScript 5 (strict) |
+| Toolchain | React Native CLI (bare workflow). **Not Expo Go** — `react-native-agora` ships native modules Expo Go cannot load. Expo prebuild / dev-client is acceptable; plain Expo Go is not |
+| State | Zustand for client state, TanStack Query for server state and caching |
+| Routing | React Navigation 6 (native-stack + bottom-tabs) with auth and onboarding gates |
+| Networking | Axios with an interceptor stack — bearer token, `X-Device-Id`, `X-App-Version`, 401 handling, envelope unwrapping |
+| Models | TypeScript types generated from the OpenAPI document; Zod schemas validating at the boundary |
+| Realtime | `laravel-echo` + `pusher-js` against Reverb |
+| RTC | `react-native-agora` |
+| Local | `react-native-keychain` (tokens), MMKV (cache and settings) |
+| Animation | `lottie-react-native` for gifts and entrance effects; SVGA through a native module |
+| Push | `@react-native-firebase/messaging` + `notifee` |
+| i18n | `i18next` + `react-i18next`, `en` and `hi` |
 
 ```
-mobile/lib/
-├── core/         config, network, storage, theme, i18n, errors
-├── data/         models, remote clients, repositories
+mobile/src/
+├── core/         config, api client, storage, theme, i18n, errors
+├── data/         generated types, endpoints, repositories
 ├── domain/       entities, repository interfaces, use cases
 ├── features/     onboarding, home, room, call, gift, wallet, profile,
 │                 social, chat, vip, ranking, events, agency, settings
-└── shared/       widgets, extensions, utils
+└── shared/       components, hooks, utils
 ```
+
+Two boundary rules survive the language change, and both matter *more* in TypeScript than
+they did in Dart:
+
+- **Nothing outside `data/` sees an API response shape.** Repositories return domain
+  entities; the envelope from [03 §2.1](03-api-contract.md#21-response-envelope) is
+  unwrapped exactly once, in the interceptor.
+- **Generated types are generated, never hand-edited.** A hand-written interface will
+  silently drift from the server — the compiler cannot know about a field the backend
+  renamed. Regenerating from the OpenAPI document is what catches it, which is why the
+  drift check in [07 §3](07-devops-deployment.md) fails the build.
 
 ---
 
@@ -383,7 +409,7 @@ Maps to SLA §5.3 and epic E.4.
 |---|---|
 | **RBAC** | [§5](#5-authorisation--the-permission-gate). Every route carries a permission; the default is deny. |
 | **At rest** | MySQL and Spaces encrypted (AES-256, DO-managed). Application-level AES-256-GCM on PII columns: phone, email, KYC documents, bank details — via a Laravel `Encrypted` cast with keys in the environment, rotatable. |
-| **In transit** | TLS 1.3 only; HSTS with preload; TLS 1.0–1.2 disabled; certificate pinning in the Flutter app for the API host. |
+| **In transit** | TLS 1.3 only; HSTS with preload; TLS 1.0–1.2 disabled; certificate pinning in the mobile app for the API host (`react-native-ssl-pinning`, or the platform network-security config on Android and ATS on iOS). |
 | **API auth** | Sanctum bearer tokens. Access token 24 h, refresh token 30 days, rotated on use. Device-bound — token records `device_id`; a token presented from a different device is revoked. |
 | **Rate limiting** | OTP send 3/hour/number and 10/day/IP · login 5/min/IP · gift send 20/min/user · general API 120/min/user · admin 300/min. Redis-backed, returns `429` with `Retry-After`. |
 | **OWASP Top 10** | A01 permission gate + object-level checks · A02 above · A03 Eloquent bindings only, no raw interpolation · A04 rate limits, idempotency, wallet row locks · A05 hardened config, debug off, no directory listing · A06 Dependabot + `composer audit` in CI · A07 bcrypt cost 12, MFA for admins, lockout after 5 failures · A08 signed artefacts, integrity-checked deploys · A09 structured audit logs, 1-year retention · A10 no user-supplied URLs fetched server-side. |
@@ -443,16 +469,23 @@ php artisan queue:work            # jobs   (or: php artisan horizon)
 
 # 3. Admin panel
 cd ../admin-web && npm install
-cp .env.example .env              # VITE_API_URL=http://localhost:8000/api/v1
+cp .env.example .env              # VITE_API_PROXY_TARGET=http://127.0.0.1:8001
 npm run dev                       # :5173
 
 # 4. Mobile
-cd ../mobile && flutter pub get
-flutter run --dart-define=API_URL=http://10.0.2.2:8000/api/v1
+cd ../mobile && npm install
+cd ios && pod install && cd ..        # macOS only
+cp .env.example .env                  # API_URL=http://10.0.2.2:8000/api/v1 (Android emulator)
+                                      # REVERB_HOST=10.0.2.2  REVERB_PORT=8080
+npm run android                       # or: npm run ios
 ```
 
+`10.0.2.2` is the Android emulator's alias for the host machine. An iOS simulator reaches the
+host on `localhost`; a physical device needs the machine's LAN IP, and Reverb must then be
+started with `REVERB_SERVER_HOST=0.0.0.0` so it is reachable off-loopback.
+
 Prerequisites: PHP 8.2+ with `bcmath`, `gd`, `intl`, `zip` (the `redis` C extension is optional — `predis/predis` is used instead); MySQL 8; Redis 7 (WSL2 or
-Memurai); Node 20; Flutter 3.2x; Composer 2.
+Memurai); Node 20; Composer 2; JDK 17 + Android SDK 34 (and Xcode 15 + CocoaPods for iOS builds, macOS only).
 
 Seeders create: a Super Admin (`superadmin@guftagu.local` / `Password@123`, **development only**), one
 Admin, one Manager, one Moderator with a deliberately partial permission set, the full permission

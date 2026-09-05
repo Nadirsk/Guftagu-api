@@ -78,7 +78,7 @@ at the branch-protection level, not by convention.
 
 ## 3. CI pipeline
 
-`.github/workflows/` — three workflows, path-filtered so a Flutter change does not run the PHP suite.
+`.github/workflows/` — three workflows, path-filtered so a mobile change does not run the PHP suite.
 
 ### `backend.yml`
 
@@ -112,8 +112,13 @@ jobs:
 
 ### `mobile.yml`
 
-`flutter pub get` → `dart format --set-exit-if-changed .` → `flutter analyze` → `flutter test` →
-`flutter build apk --debug` (PR) / `appbundle --release` (tag).
+`npm ci` → `eslint .` → `prettier --check .` → `tsc --noEmit` → `jest --coverage` →
+`npm audit --audit-level=high` → `./gradlew assembleDebug` (PR) / `bundleRelease` (tag).
+
+iOS builds run on a `macos-latest` runner and **only on a tag**: a macOS minute costs about ten
+Linux minutes, and nothing about reviewing a pull request needs an `.ipa`. Android covers the
+"does it still compile against native modules" question on every PR, which is the one that
+actually catches breakage.
 
 ### Branch-protection required checks
 
@@ -252,7 +257,7 @@ drafted · client informed if there is user-visible change · **not on a Friday 
 
 | Layer | Tool | Alerts on |
 |---|---|---|
-| Errors | Sentry (backend, Vue, Flutter) | New issue, error-rate spike |
+| Errors | Sentry (backend, Vue, React Native) | New issue, error-rate spike |
 | Uptime | UptimeRobot / DO checks | `api`, `admin`, `ws` down for 2 min |
 | Infrastructure | DO monitoring | CPU > 80%, RAM > 85%, disk > 80% |
 | Queues | Horizon | Queue depth > 1,000; any failed job |
@@ -281,16 +286,22 @@ overall verdict — used by the LB and by uptime monitoring.
 
 | | Development | Staging | Production |
 |---|---|---|---|
-| Flavour | `dev` | `staging` | `prod` |
-| App id | `com.guftagu.app.dev` | `com.guftagu.app.staging` | `com.guftagu.app` |
+| Android product flavor / iOS scheme | `dev` | `staging` | `prod` |
+| App id / bundle id | `com.guftagu.app.dev` | `com.guftagu.app.staging` | `com.guftagu.app` |
 | API | localhost | staging | production |
 | Signing | debug | upload key | release keystore |
+
+Per-environment values come from `react-native-config` (`.env.dev`, `.env.staging`, `.env.prod`),
+which bakes them into both native builds — **not** from a JS constants file. A JS file cannot
+reach the native side, and the Agora app id and Firebase config are both needed there.
 
 All three installable side by side, so a tester never has to guess which build they are on.
 
 ### 8.2 Android
 
-Signed AAB, `minSdk 26`, `targetSdk 34`, R8 with ProGuard rules for Agora, Razorpay and Firebase.
+Signed AAB, `minSdk 26`, `targetSdk 34`, Hermes enabled, R8 with ProGuard rules for Agora, Razorpay,
+Firebase **and React Native itself** — the default RN ProGuard rules are the ones people forget, and
+the symptom is a release build that crashes where debug does not.
 Internal testing track → closed testing → production. Data-safety form completed (⚠ CI-05). Review
 typically 1–3 days.
 

@@ -5,7 +5,6 @@ namespace App\Domain\Access\Services;
 use App\Domain\Access\Exceptions\ScopeException;
 use App\Models\AdminUser;
 use Illuminate\Contracts\Database\Query\Builder as BuilderContract;
-use Illuminate\Support\Facades\Cache;
 
 /**
  * GFT-129 / GFT-147 — the query-level half of scoping (B.1a, B.5a).
@@ -33,7 +32,7 @@ use Illuminate\Support\Facades\Cache;
  */
 class ScopeFilter
 {
-    protected const TTL = 300;
+    protected const TTL = PermissionCache::TTL;
 
     public function __construct(protected PermissionResolver $resolver)
     {
@@ -203,14 +202,14 @@ class ScopeFilter
             return null;
         }
 
-        // Tagged with the same tag PermissionResolver uses, so its `flushFor()` clears the
-        // scope too. Five call sites already flush permissions after a grant changes;
+        // The same per-admin namespace PermissionResolver uses, so its `flushFor()` clears
+        // the scope too. Five call sites already flush permissions after a grant changes;
         // adding a sixth thing they each have to remember is how a revoked scope survives
         // in cache for five minutes and lets somebody see an agency they were just
         // removed from.
-        return Cache::tags(["perm:{$admin->id}"])->remember(
-            "scope:{$key}:{$admin->id}",
-            self::TTL,
+        return app(PermissionCache::class)->remember(
+            $admin->id,
+            "scope:{$key}",
             function () use ($admin, $key) {
                 $grants = $admin->directGrants()->allow()->notExpired()->get();
 
@@ -242,10 +241,11 @@ class ScopeFilter
 
     /**
      * Only needed to clear a scope without touching permissions. The usual path is
-     * `PermissionResolver::flushFor()`, which clears both through the shared tag.
+     * `PermissionResolver::flushFor()`, which clears both — they share one namespace, so
+     * this is in fact the same call.
      */
     public function flushFor(int $adminId): void
     {
-        Cache::tags(["perm:{$adminId}"])->flush();
+        app(PermissionCache::class)->flush($adminId);
     }
 }

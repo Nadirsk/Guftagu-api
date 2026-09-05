@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Domain\Audit\AuditLogger;
+use App\Models\AdminUser;
 use App\Models\AuditLog;
 use Closure;
 use Illuminate\Http\Request;
@@ -86,7 +87,12 @@ class CaptureUnauditedMutations
             return false;
         }
 
-        if ($request->user() === null) {
+        // `audit_logs.admin_user_id` is a foreign key onto `admin_users`. Now that the
+        // mobile group exists (D.3, D.4) this middleware also sees requests authenticated
+        // as a `User`, and writing that id here would either break the constraint or —
+        // worse — silently attribute an app action to whichever admin shares the id. A.10d
+        // is about admin mutations; app traffic is recorded by its own domain rows.
+        if (! $request->user() instanceof AdminUser) {
             return false;
         }
 
