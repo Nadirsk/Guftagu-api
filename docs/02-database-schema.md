@@ -293,8 +293,8 @@ one escalating animation. Never one row with a mutable counter.
 | `user_frames` | `user_id`, `frame_id`, `acquired_at`, `expires_at`, `is_equipped` |
 | `achievements` | `key`, `name_en`, `name_hi`, `icon_url`, `criteria` JSON, `reward_type`, `reward_value`, `is_active` |
 | `user_achievements` | `user_id`, `achievement_id`, `progress`, `target`, `completed_at`, `claimed_at` |
-| `daily_checkins` | `user_id`, `checkin_date` DATE, `streak_day`, `reward_type`, `reward_value`. Unique (`user_id`,`checkin_date`) |
-| `checkin_rewards` | `streak_day` unique, `reward_type` (`coins` `frame` `badge` `vip_days`), `reward_value`, `icon_url` |
+| `daily_checkins` | `user_id`, `checkin_date` DATE, `streak_day`, `reward_type`, `reward_value` — a snapshot of the reward at claim time, not a live reference. Unique (`user_id`,`checkin_date`) |
+| `checkin_rewards` | `streak_day` unique (1-7), `reward_type` (`coins` `diamonds` for now — `frame`/`badge`/`vip_days` need a user-inventory table that doesn't exist yet), `reward_value`, `icon_url`, `is_active` |
 
 Wealth points = lifetime coins **spent**. Charm points = lifetime diamonds **earned**. Account XP
 accrues from activity. Three progressions, three rows per user in `user_levels`.

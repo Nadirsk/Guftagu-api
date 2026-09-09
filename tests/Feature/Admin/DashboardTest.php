@@ -10,6 +10,7 @@ use App\Models\AdminUser;
 use App\Models\DailyStat;
 use App\Models\ReportExport;
 use App\Models\Role;
+use App\Models\Room;
 use App\Models\User;
 use App\Models\UserProfile;
 use Database\Seeders\PermissionSeeder;
@@ -86,16 +87,21 @@ class DashboardTest extends TestCase
         $this->makeUser(['last_active_at' => now()->subDays(2)]);
         $this->makeUser(['status' => User::STATUS_BANNED]);
 
+        $owner = $this->makeUser();
+        Room::create(['room_code' => 'RM000001', 'owner_id' => $owner->id, 'name' => 'Live room', 'status' => Room::LIVE]);
+        Room::create(['room_code' => 'RM000002', 'owner_id' => $owner->id, 'name' => 'Idle room', 'status' => Room::IDLE]);
+
         $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
             ->getJson($this->base.'/dashboard/kpis')
             ->assertOk();
 
-        $this->assertSame(3, $response->json('data.users.total'));
+        $this->assertSame(4, $response->json('data.users.total'));
         $this->assertSame(1, $response->json('data.users.banned'));
         $this->assertSame(1, $response->json('data.engagement.active_today'));
 
-        // Rooms are honestly absent rather than silently zero.
-        $this->assertFalse($response->json('data.rooms.available'));
+        // A.4 landed the rooms module: a real, live-only count, not a stub.
+        $this->assertTrue($response->json('data.rooms.available'));
+        $this->assertSame(1, $response->json('data.rooms.live'));
     }
 
     #[Test]
@@ -241,6 +247,23 @@ class DashboardTest extends TestCase
         $this->assertSame(102, $bucket['total_users'], 'A running total must take the last value, not the sum.');
     }
 
+    #[Test]
+    public function a_stream_reports_live_once_the_rollup_has_ever_seen_it_and_stays_that_way(): void
+    {
+        DailyStat::create(['date' => now()->subDay()->toDateString(), 'recharge_coins' => 500]);
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->getJson($this->base.'/dashboard/revenue')
+            ->assertOk();
+
+        $streamsLive = $response->json('data.streams_live');
+
+        $this->assertTrue($streamsLive['recharge'], 'A rollup day with real coins should flip the flag on.');
+        $this->assertFalse($streamsLive['gifting'], 'No gifting activity has ever posted, so it stays honestly false.');
+        $this->assertFalse($streamsLive['vip']);
+        $this->assertTrue($streamsLive['admin']);
+    }
+
     // -------------------------------------------------------------------- A.2c
 
     #[Test]
@@ -334,6 +357,45 @@ class DashboardTest extends TestCase
         $csv = Storage::disk('local')->get($export->file_path);
         $this->assertStringContainsString('coins_purchased', $csv);
         $this->assertStringContainsString('1000', $csv);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->get($this->base."/dashboard/exports/{$export->id}/download")
+            ->assertOk();
+    }
+
+    #[Test]
+    public function the_job_produces_a_downloadable_pdf(): void
+    {
+        Storage::fake('local');
+
+        $user = $this->makeUser();
+        $wallet = \App\Models\Wallet::firstOrCreate(['user_id' => $user->id]);
+
+        \Illuminate\Support\Facades\DB::table('coin_transactions')->insert([
+            'uuid'           => (string) \Illuminate\Support\Str::uuid(),
+            'wallet_id'      => $wallet->id,
+            'user_id'        => $user->id,
+            'direction'      => 'credit',
+            'amount'         => 1000,
+            'balance_before' => 0,
+            'balance_after'  => 1000,
+            'type'           => 'recharge',
+            'created_at'     => now(),
+        ]);
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/dashboard/export', ['type' => 'revenue', 'format' => 'pdf'])
+            ->assertStatus(202);
+
+        $export = ReportExport::first();
+        $this->assertSame('pdf', $export->format);
+
+        (new BuildReportExport($export->id))->handle(app(\App\Domain\Reports\ReportEngine::class));
+
+        $export->refresh();
+
+        $this->assertSame(ReportExport::READY, $export->status);
+        Storage::disk('local')->assertExists($export->file_path);
 
         $this->actingAs($this->superAdmin, 'sanctum-admin')
             ->get($this->base."/dashboard/exports/{$export->id}/download")

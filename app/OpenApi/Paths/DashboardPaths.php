@@ -13,8 +13,8 @@ Cached for 10 seconds, so a room full of admins polling this is one query rather
 dozens. The panel refreshes it every 5 seconds, which satisfies A.2a's "updates within 5
 seconds without a page reload".
 
-`rooms.available` is **false** until the rooms module lands — the tile says "not built yet"
-rather than reporting zero live rooms, which would be a different and untrue claim.
+`rooms.live` is a real count of rooms with `status = live`, read off the same table A.4's
+room management screen uses.
 MD,
     security: [['bearerAuth' => []]],
     tags: ['Dashboard'],
@@ -42,8 +42,8 @@ MD,
                         new OA\Property(property: 'kyc_pending', type: 'integer', example: 2),
                     ]),
                     new OA\Property(property: 'rooms', type: 'object', properties: [
-                        new OA\Property(property: 'live', type: 'integer', example: 0),
-                        new OA\Property(property: 'available', type: 'boolean', example: false),
+                        new OA\Property(property: 'live', type: 'integer', example: 3),
+                        new OA\Property(property: 'available', type: 'boolean', example: true),
                     ]),
                     new OA\Property(property: 'as_of', type: 'string', format: 'date-time'),
                 ]),
@@ -61,8 +61,10 @@ Read entirely from the `daily_stats` rollup — **no query here scans a ledger**
 A.2's NFR and is enforced by a test that query-logs this endpoint.
 
 Streams are reported separately and `coin_total` is their exact sum for the range, as A.2b
-requires. `streams_live` says which are real yet: recharge, gifting and VIP stay at zero
-until payments and gifting land, so a flat line there means "not built", not "no revenue".
+requires. `streams_live` says which streams have ever posted through the rollup: recharge,
+gifting and VIP each flip to `true` the first time `StatsRollup` records real activity for
+them, so a flat line before that means "not built yet", not "no revenue" — and the flag
+turns itself on once payments and gifting land, with no code change needed here.
 
 A range longer than 400 days is clamped; a reversed range is swapped.
 MD,
@@ -131,19 +133,20 @@ MD,
 )]
 #[OA\Post(
     path: '/admin/dashboard/export',
-    summary: 'Queue a CSV export (A.2d)',
-    description: 'Returns `202` immediately with a uuid — the file is built by a queue worker, so the caller is never blocked. Poll `/admin/dashboard/exports` until the row turns `ready`, then download it. **A worker must be running** (`php artisan queue:work`) or the row stays `queued`.',
+    summary: 'Queue a CSV or PDF export (A.2d)',
+    description: 'Returns `202` immediately with a uuid — the file is built by a queue worker, so the caller is never blocked. Poll `/admin/dashboard/exports` until the row turns `ready`, then download it. **A worker must be running** (`php artisan queue:work`) or the row stays `queued`. `format: pdf` is refused with `TOO_LARGE_FOR_PDF` above the report engine\'s PDF row cap — export as CSV instead for a long range.',
     security: [['bearerAuth' => []]],
     tags: ['Dashboard'],
     requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['type'], properties: [
         new OA\Property(property: 'type', type: 'string', enum: ['revenue']),
-        new OA\Property(property: 'format', type: 'string', enum: ['csv'], default: 'csv'),
+        new OA\Property(property: 'format', type: 'string', enum: ['csv', 'pdf'], default: 'csv'),
         new OA\Property(property: 'from', type: 'string', format: 'date'),
         new OA\Property(property: 'to', type: 'string', format: 'date'),
     ])),
     responses: [
         new OA\Response(response: 202, description: 'Queued', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
         new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `dashboard.export`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 422, description: '`TOO_LARGE_FOR_PDF` — the range is too large to lay out as a PDF; export as CSV instead', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]
 #[OA\Get(
@@ -163,7 +166,7 @@ MD,
     tags: ['Dashboard'],
     parameters: [new OA\Parameter(name: 'export', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
     responses: [
-        new OA\Response(response: 200, description: 'The CSV file', content: new OA\MediaType(mediaType: 'text/csv')),
+        new OA\Response(response: 200, description: 'The export file (CSV or PDF, per the export\'s `format`)', content: new OA\MediaType(mediaType: 'text/csv')),
         new OA\Response(response: 400, description: '`BAD_REQUEST` — not finished; `details.status` says where it is', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
         new OA\Response(response: 403, description: '`FORBIDDEN` — it belongs to another admin', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
         new OA\Response(response: 404, description: '`NOT_FOUND` — the file has been cleaned up', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),

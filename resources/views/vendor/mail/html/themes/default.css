@@ -1,6 +1,6 @@
-/* Guftagu admin mail theme — dark console card on a neutral page, matching the panel's
-   own navy + amber palette (admin-web/src/assets/styles/main.css) so this reads as the
-   product, not a generic transactional email. */
+/* Guftagu admin mail theme — a plain white card on a soft grey page, with the panel's own
+   amber accent (admin-web/src/assets/styles/main.css) kept only for the logo, the button
+   and the credential-panel border, not the whole page. */
 
 /* Base */
 
@@ -14,8 +14,8 @@ body *:not(html):not(style):not(br):not(tr):not(code) {
 
 body {
     -webkit-text-size-adjust: none;
-    background-color: #eef2f7;
-    color: #c3ccd9;
+    background-color: #f4f5f7;
+    color: #3d4453;
     height: 100%;
     line-height: 1.5;
     margin: 0;
@@ -32,7 +32,7 @@ blockquote {
 }
 
 a {
-    color: #f0a93b;
+    color: #a6620a;
 }
 
 a img {
@@ -42,7 +42,7 @@ a img {
 /* Typography */
 
 h1 {
-    color: #eef2f7;
+    color: #1f2430;
     font-size: 18px;
     font-weight: 600;
     margin-top: 0;
@@ -64,7 +64,7 @@ h3 {
 }
 
 p {
-    color: #c3ccd9;
+    color: #3d4453;
     font-size: 15px;
     line-height: 1.6em;
     margin-top: 0;
@@ -85,7 +85,7 @@ img {
     -premailer-cellpadding: 0;
     -premailer-cellspacing: 0;
     -premailer-width: 100%;
-    background-color: #eef2f7;
+    background-color: #f4f5f7;
     margin: 0;
     padding: 32px 0;
     width: 100%;
@@ -108,7 +108,7 @@ img {
 }
 
 .header a {
-    color: #eef2f7;
+    color: #1f2430;
     font-size: 19px;
     font-weight: bold;
     text-decoration: none;
@@ -130,7 +130,7 @@ img {
     -premailer-cellpadding: 0;
     -premailer-cellspacing: 0;
     -premailer-width: 100%;
-    background-color: #eef2f7;
+    background-color: #f4f5f7;
     margin: 0;
     padding: 0;
     width: 100%;
@@ -140,11 +140,11 @@ img {
     -premailer-cellpadding: 0;
     -premailer-cellspacing: 0;
     -premailer-width: 570px;
-    background-color: #1a2230;
-    border-color: #2f3c52;
+    background-color: #ffffff;
+    border-color: #e5e8ee;
     border-radius: 10px;
     border-width: 1px;
-    box-shadow: 0 8px 24px 0 rgba(16, 21, 28, 0.18);
+    box-shadow: 0 1px 3px 0 rgba(16, 21, 28, 0.06);
     margin: 0 auto;
     padding: 0;
     width: 570px;
@@ -157,13 +157,13 @@ img {
 /* Subcopy */
 
 .subcopy {
-    border-top: 1px solid #2f3c52;
+    border-top: 1px solid #e5e8ee;
     margin-top: 25px;
     padding-top: 25px;
 }
 
 .subcopy p {
-    color: #8494ab;
+    color: #6b7280;
     font-size: 13px;
 }
 
@@ -180,13 +180,13 @@ img {
 }
 
 .footer p {
-    color: #5d6b81;
+    color: #8a93a3;
     font-size: 12px;
     text-align: center;
 }
 
 .footer a {
-    color: #8494ab;
+    color: #6b7280;
     text-decoration: underline;
 }
 
@@ -201,14 +201,14 @@ img {
 }
 
 .table th {
-    border-bottom: 1px solid #2f3c52;
-    color: #8494ab;
+    border-bottom: 1px solid #e5e8ee;
+    color: #6b7280;
     margin: 0;
     padding-bottom: 8px;
 }
 
 .table td {
-    color: #c3ccd9;
+    color: #3d4453;
     font-size: 15px;
     line-height: 18px;
     margin: 0;
@@ -236,7 +236,7 @@ img {
 .button {
     -webkit-text-size-adjust: none;
     border-radius: 6px;
-    color: #10151c;
+    color: #1f2430;
     display: inline-block;
     overflow: hidden;
     text-decoration: none;
@@ -254,45 +254,46 @@ img {
 
 .button-green,
 .button-success {
-    background-color: #3fbfa0;
-    border-bottom: 8px solid #3fbfa0;
-    border-left: 18px solid #3fbfa0;
-    border-right: 18px solid #3fbfa0;
-    border-top: 8px solid #3fbfa0;
+    background-color: #2f9e7c;
+    color: #ffffff;
+    border-bottom: 8px solid #2f9e7c;
+    border-left: 18px solid #2f9e7c;
+    border-right: 18px solid #2f9e7c;
+    border-top: 8px solid #2f9e7c;
 }
 
 .button-red,
 .button-error {
-    background-color: #e0574f;
-    color: #eef2f7;
-    border-bottom: 8px solid #e0574f;
-    border-left: 18px solid #e0574f;
-    border-right: 18px solid #e0574f;
-    border-top: 8px solid #e0574f;
+    background-color: #d1483f;
+    color: #ffffff;
+    border-bottom: 8px solid #d1483f;
+    border-left: 18px solid #d1483f;
+    border-right: 18px solid #d1483f;
+    border-top: 8px solid #d1483f;
 }
 
-/* Panels — the OTP code box */
+/* Panels — the OTP / credential box */
 
 .panel {
-    border: 1px solid #2f3c52;
+    border: 1px solid #eee1cb;
     border-left: #f0a93b solid 3px;
-    background-color: #10151c;
+    background-color: #fdf8ee;
     border-radius: 6px;
     margin: 24px 0;
 }
 
 .panel-content {
     background-color: transparent;
-    color: #c3ccd9;
+    color: #3d4453;
     padding: 20px 22px;
 }
 
 .panel-content p {
-    color: #c3ccd9;
+    color: #3d4453;
 }
 
 .panel-content h1 {
-    color: #f0a93b;
+    color: #1f2430;
     font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
     font-size: 34px;
     font-weight: 700;

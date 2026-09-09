@@ -106,15 +106,25 @@ may use numeric ids. Never leak a sequential id to the app.
 
 **Epic D.1 · E.4**
 
+> Widened from the original phone-OTP + Google/Apple-only spec to match the actual
+> onboarding screens: email is a first-class identifier alongside phone, password login
+> sits next to OTP for both, and the social providers are Google + Facebook (no Apple).
+> Deliberately **not** built: refresh-token rotation and per-device token binding — every
+> route below issues a single long-lived Sanctum token per device instead (see
+> `App\Http\Controllers\Api\AuthController`).
+
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/auth/otp/send` | — | Send OTP. Body `{phone, country_code, purpose}`. Throttled 3/hr/number |
-| POST | `/auth/otp/verify` | — | `{phone, country_code, otp, device}` → token + `is_new_user` |
-| POST | `/auth/social` | — | `{provider: google\|apple, id_token, device}` → token |
-| POST | `/auth/refresh` | refresh | Rotate the access token |
+| POST | `/auth/otp/send` | — | `{channel: email\|phone, email\|phone, country_code, purpose: auth\|reset_password}`. Throttled 3/hr/identifier · 10/day/IP |
+| POST | `/auth/otp/verify` | — | `{channel, email\|phone, country_code, otp, device}` → token + `is_new_user`. Always `purpose: auth` — registers the account if it doesn't exist yet |
+| POST | `/auth/login` | — | `{channel, email\|phone, country_code, password, device}` → token. Never registers — a password only works once an account already exists |
+| POST | `/auth/social` | — | `{provider: google\|facebook, token, device}` → token. `token` is the id/access token the app already got from the native SDK; verified server-side against the provider |
+| POST | `/auth/password/forgot` | — | `{channel, email\|phone, country_code}` — sends a reset OTP. Same response whether or not the account exists |
+| POST | `/auth/password/reset` | — | `{channel, email\|phone, country_code, otp, password, password_confirmation, device}` → token. Also how a password is set for the first time on an OTP-only account. Revokes every other device's token |
 | POST | `/auth/logout` | ✓ | Revoke this device's token |
-| GET | `/auth/me` | ✓ | Current user, profile, wallet summary, VIP, unread counts |
-| DELETE | `/auth/account` | ✓ | DPDPA deletion request — 30-day grace, reversible until then |
+| GET | `/auth/me` | ✓ | Current user + profile. Wallet/VIP/unread counts are a fast-follow (Economy/Notifications epics), not in this response yet |
+| POST | `/auth/profile/setup` | ✓ | `{display_name, gender, date_of_birth, country, invite_code}` — the profile-setup screen shown whenever `requires_profile_setup` is true. `date_of_birth` must be 18+ years ago; `invite_code` is another user's `guftagu_id`, recorded once and not changeable after |
+| DELETE | `/auth/account` | ✓ | DPDPA deletion request — 30-day grace, reversible until then — **not built yet** |
 | GET | `/profile` | ✓ | Own profile |
 | PATCH | `/profile` | ✓ | `{display_name, bio, gender, date_of_birth, city}` — banned-word checked |
 | POST | `/profile/avatar` | ✓ | multipart; re-encoded server-side |
@@ -129,10 +139,12 @@ may use numeric ids. Never leak a sequential id to the app.
 
 ```json
 { "success": true, "data": {
-  "access_token": "…", "refresh_token": "…", "expires_in": 86400,
-  "is_new_user": false,
+  "token": "…", "expires_at": "2026-09-09T06:14:30Z",
+  "is_new_user": false, "requires_profile_setup": false,
   "user": { "uuid": "…", "guftagu_id": "GF8420156", "display_name": "Aarav",
-            "avatar_url": "…", "level": 12, "vip_tier": 2, "agora_uid": 84201567 }
+            "avatar_url": "…", "gender": "male", "date_of_birth": "1995-05-05",
+            "country": "India", "agora_uid": 84201567, "status": "active",
+            "is_profile_complete": true }
 } }
 ```
 
@@ -290,8 +302,8 @@ Failure modes: `INSUFFICIENT_BALANCE` (402) · `GIFT_UNAVAILABLE` (409) · `VIP_
 | GET | `/frames` | Owned; `POST /frames/{id}/equip` |
 | POST | `/frames/{id}/purchase` | |
 | GET | `/achievements` | Progress list; `POST /achievements/{id}/claim` |
-| GET | `/checkin` | Streak state and today's reward |
-| POST | `/checkin` | Claim today (D.7c) |
+| GET | `/checkin` | Streak state and today's reward. Reward types are `coins`/`diamonds` only for now — cosmetic types need an inventory table that does not exist yet |
+| POST | `/checkin` | Claim today (D.7c). `409 ALREADY_CLAIMED` same day; missing a calendar day resets to day 1; completing day 7 rolls into a new cycle at day 1 rather than stopping |
 | GET | `/rankings` | `?board=wealth\|charm\|room\|agency&period=daily\|weekly\|monthly` — from Redis |
 | GET | `/rankings/me` | Caller's rank on each board |
 | GET | `/events` | `?status=live\|upcoming\|ended` |
@@ -375,7 +387,7 @@ Failure modes: `INSUFFICIENT_BALANCE` (402) · `GIFT_UNAVAILABLE` (409) · `VIP_
 | GET | `/admin/permissions` | `access.permission_grant` | Full catalogue, grouped by module |
 | GET | `/admin/permissions/grantable` | `access.permission_grant` | **Only what the caller may delegate** — the panel builds its grant UI from this |
 | GET | `/admin/admins` | `access.admin_manage` | List panel users |
-| POST | `/admin/admins` | `access.admin_manage` | Create Admin / Manager / Moderator |
+| POST | `/admin/admins` | `access.admin_manage` | Create Admin / Manager / Moderator — mails the new user their sign-in email, the plaintext password, and the admin panel URL (`AdminWelcomeMail`, GFT-127). `guftagu.frontend_url` (env `FRONTEND_URL`) is the link; a delivery failure is logged, not fatal — the account is already persisted. |
 | PATCH | `/admin/admins/{id}` | `access.admin_manage` | |
 | POST | `/admin/admins/{id}/status` | `access.admin_manage` | Activate / suspend |
 | GET | `/admin/admins/{id}/permissions` | `access.permission_grant` | Effective set with origin (role vs direct) |
@@ -509,6 +521,7 @@ single time — silent to the room, never silent in the log.
 | POST | `/admin/gifts/{id}/limited-drop` | `gifts.drop_manage` — `{stock, from, to}` (A.6b) |
 | CRUD | `/admin/vip-tiers` | `vip.manage` (A.6c, ⚠ CI-02) |
 | CRUD | `/admin/frames`, `/admin/badges`, `/admin/entrance-effects` | `gifts.manage` (A.6d) |
+| CRUD | `/admin/checkin-rewards` | `checkin.manage` — the 7-day ladder, one row per `streak_day` 1-7 (D.7c) |
 | GET/PATCH | `/admin/economy/rates` | `economy.rates_manage` (A.7a, ⚠ CI-01) |
 | CRUD | `/admin/economy/packages` | `economy.packages_manage` (A.7a) |
 | CRUD | `/admin/economy/commission-slabs` | `economy.commission_manage` (A.7c, ⚠ CI-02) |

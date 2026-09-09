@@ -358,9 +358,17 @@ class UserController extends Controller
 
     /**
      * PATCH /admin/users/{user} — GFT-027 covers level/VIP; this is the profile edit.
+     *
+     * Real users onboard through the app's own phone/OTP flow, which lives outside this
+     * panel entirely, so `phone`/`email` are rejected for everyone except Super Admin —
+     * same "full access, everyone else stays out of the OTP-linked fields" rule as
+     * AdminAuthController::updateProfile's `$mayChangeEmail` gate.
      */
     public function update(Request $request, User $user): JsonResponse
     {
+        $actor = $request->user();
+        $mayChangeContact = $actor->isSuperAdmin();
+
         $data = $request->validate([
             'display_name'  => ['sometimes', 'string', 'max:50'],
             'bio'           => ['sometimes', 'nullable', 'string', 'max:300'],
@@ -369,17 +377,38 @@ class UserController extends Controller
             'gender'        => ['sometimes', 'nullable', 'string', 'max:20'],
             'date_of_birth' => ['sometimes', 'nullable', 'date', 'before:-18 years'],
             'language'      => ['sometimes', 'nullable', 'string', 'max:5'],
+            'phone'         => $mayChangeContact ? ['sometimes', 'string', 'max:20'] : ['prohibited'],
+            'email'         => $mayChangeContact ? ['sometimes', 'nullable', 'email:filter', 'max:191'] : ['prohibited'],
         ]);
+
+        if (isset($data['phone']) && User::query()->where('phone_hash', User::hash($data['phone']))
+            ->where('id', '!=', $user->id)->exists()) {
+            return ApiResponse::error('VALIDATION_ERROR', 'A user with that phone number already exists.', ['phone' => ['Already taken']], 422);
+        }
+
+        if (! empty($data['email']) && User::query()->where('email_hash', User::hash($data['email']))
+            ->where('id', '!=', $user->id)->exists()) {
+            return ApiResponse::error('VALIDATION_ERROR', 'A user with that email already exists.', ['email' => ['Already taken']], 422);
+        }
+
+        $contactData = collect($data)->only(['phone', 'email'])->all();
+        $profileData = collect($data)->except(['phone', 'email'])->all();
+
+        if ($contactData !== []) {
+            $contactBefore = $user->only(array_keys($contactData));
+            $user->fill($contactData)->save();
+            $this->audit->log($actor, 'user.contact_update', 'users', User::class, $user->id, $contactBefore, $contactData);
+        }
 
         $profile = $user->profile()->firstOrCreate(
             ['user_id' => $user->id],
             ['display_name' => $user->guftagu_id],
         );
 
-        $before = $profile->only(array_keys($data));
-        $profile->fill($data)->save();
+        $before = $profile->only(array_keys($profileData));
+        $profile->fill($profileData)->save();
 
-        $this->audit->log($request->user(), 'user.update', 'users', User::class, $user->id, $before, $data);
+        $this->audit->log($actor, 'user.update', 'users', User::class, $user->id, $before, $profileData);
 
         return ApiResponse::success($this->rowPayload($user->fresh(['profile', 'wallet', 'kyc'])), 'User updated');
     }

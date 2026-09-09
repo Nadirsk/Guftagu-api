@@ -98,6 +98,7 @@ MD,
 #[OA\Tag(name: 'Economy', description: 'Rates, packages, commission and the ledger — epic A.7a/c/d. Rational rates, integer basis points')]
 #[OA\Tag(name: 'Payouts', description: 'The withdrawal review queue — A.7b. Freeze on request, pay or return on decision')]
 #[OA\Tag(name: 'Store', description: 'Gifts, categories and limited drops — epic A.6a/b. Writes flush the app catalogue cache')]
+#[OA\Tag(name: 'Levels', description: 'The wealth/charm level ladder — GFT-027, docs/00 §7. A user\'s level is resolved at read time against this, never stored, unless overridden via `POST /admin/users/{user}/level-override`')]
 #[OA\Tag(name: 'VIP', description: 'VIP tiers and the cosmetics they gate — A.6c/d. Prices are integer paise')]
 #[OA\Tag(name: 'Support', description: 'The support inbox, SLA timers and escalation — epic B.4')]
 #[OA\Tag(name: 'Content', description: 'Banners, announcements, CMS pages and FAQs — A.10a. Scheduled content derives its visibility')]
@@ -111,6 +112,13 @@ MD,
 #[OA\Tag(name: 'Rooms', description: 'Room monitoring and enforcement — epic A.4. Force-close lands in both the audit and moderation logs')]
 #[OA\Tag(name: 'Room catalogue', description: 'Categories and themes the app offers — A.4d. Readable with rooms.view, editable with rooms.theme_manage')]
 #[OA\Tag(name: 'Dev Helpers', description: 'Local-environment conveniences. These routes do not exist outside APP_ENV=local')]
+#[OA\Tag(name: 'Friends', description: 'The friend list (a mutual follow) — epic D.3b, GFT-224. No request/accept flow: follow the other person back and you are friends')]
+#[OA\Tag(name: 'Follow', description: 'Follow, unfollow, followers and following — epic D.3b, GFT-224')]
+#[OA\Tag(name: 'Blocks', description: 'The block list and block/unblock — epic D.9c, GFT-237. Enforced across DMs, calls, profile and search, not just here')]
+#[OA\Tag(name: 'Visitors', description: 'Profile-visit recording and the visitor list — epic D.3b, GFT-227. A user only ever sees their own visitors')]
+#[OA\Tag(name: 'Moments', description: 'Posts, likes and comments — epic D.3d, GFT-228. Cursor-paginated, uuid-addressed throughout')]
+#[OA\Tag(name: 'Messaging', description: 'Direct and group conversations, messages and delivery/read receipts — epic D.4, GFT-235/236')]
+#[OA\Tag(name: 'Search', description: 'Search over people and rooms, plus recent-search history — epic D.3a, GFT-222')]
 
 // ----------------------------------------------------------------- reusable schemas
 
@@ -402,6 +410,98 @@ MD,
         new OA\Property(property: 'performed_by', type: 'string', description: 'The admin who made a manual adjustment', nullable: true),
         new OA\Property(property: 'is_adjustment', type: 'boolean'),
         new OA\Property(property: 'created_at', type: 'string', format: 'date-time'),
+    ],
+    type: 'object'
+)]
+#[OA\Schema(
+    schema: 'SocialUserCard',
+    title: 'Person card',
+    description: 'App\Support\SocialPresenter::user() — the person card on every post, comment, message and list row. The mobile API never exposes an auto-increment id.',
+    properties: [
+        new OA\Property(property: 'uuid', type: 'string', format: 'uuid'),
+        new OA\Property(property: 'guftagu_id', type: 'string', example: 'GF8420156'),
+        new OA\Property(property: 'display_name', type: 'string', nullable: true),
+        new OA\Property(property: 'avatar_url', type: 'string', nullable: true),
+    ],
+    type: 'object'
+)]
+#[OA\Schema(
+    schema: 'CursorMeta',
+    description: 'docs/03 §2.3 — cursor pagination for feeds and chat. The cursor is opaque; do not do arithmetic on it.',
+    properties: [
+        new OA\Property(property: 'request_id', type: 'string'),
+        new OA\Property(property: 'timestamp', type: 'string', format: 'date-time'),
+        new OA\Property(property: 'next_cursor', type: 'string', nullable: true),
+        new OA\Property(property: 'has_more', type: 'boolean'),
+    ],
+    type: 'object'
+)]
+#[OA\Schema(
+    schema: 'PostRow',
+    properties: [
+        new OA\Property(property: 'uuid', type: 'string', format: 'uuid'),
+        new OA\Property(property: 'author', ref: '#/components/schemas/SocialUserCard'),
+        new OA\Property(property: 'type', type: 'string', enum: ['text', 'image', 'audio']),
+        new OA\Property(property: 'body', type: 'string', nullable: true),
+        new OA\Property(property: 'media_urls', type: 'array', items: new OA\Items(type: 'string'), example: []),
+        new OA\Property(property: 'visibility', type: 'string', enum: ['public', 'followers', 'private']),
+        new OA\Property(property: 'like_count', type: 'integer', example: 0),
+        new OA\Property(property: 'comment_count', type: 'integer', example: 0),
+        new OA\Property(property: 'is_hidden', type: 'boolean'),
+        new OA\Property(property: 'liked_by_me', type: 'boolean', description: 'null when not resolved for the caller (e.g. an unauthenticated public-feed read)', nullable: true),
+        new OA\Property(property: 'created_at', type: 'string', format: 'date-time', nullable: true),
+    ],
+    type: 'object'
+)]
+#[OA\Schema(
+    schema: 'PostCommentRow',
+    properties: [
+        new OA\Property(property: 'uuid', type: 'string', format: 'uuid'),
+        new OA\Property(property: 'post_uuid', type: 'string', format: 'uuid', nullable: true),
+        new OA\Property(property: 'author', ref: '#/components/schemas/SocialUserCard', description: 'null on a deleted comment — a tombstone keeps its place in the thread', nullable: true),
+        new OA\Property(property: 'parent_uuid', type: 'string', format: 'uuid', description: 'null for a top-level comment', nullable: true),
+        new OA\Property(property: 'body', type: 'string', description: 'null on a deleted comment', nullable: true),
+        new OA\Property(property: 'is_deleted', type: 'boolean'),
+        new OA\Property(property: 'created_at', type: 'string', format: 'date-time', nullable: true),
+    ],
+    type: 'object'
+)]
+#[OA\Schema(
+    schema: 'MessageRow',
+    properties: [
+        new OA\Property(property: 'uuid', type: 'string', format: 'uuid'),
+        new OA\Property(property: 'conversation_uuid', type: 'string', format: 'uuid', nullable: true),
+        new OA\Property(property: 'sender', ref: '#/components/schemas/SocialUserCard', description: 'null for a system message', nullable: true),
+        new OA\Property(property: 'type', type: 'string', enum: ['text', 'image', 'audio', 'video', 'gift', 'system']),
+        new OA\Property(property: 'body', type: 'string', description: 'null on a message deleted for the caller/everyone', nullable: true),
+        new OA\Property(property: 'media_url', type: 'string', nullable: true),
+        new OA\Property(property: 'media_meta', type: 'object', nullable: true),
+        new OA\Property(property: 'reply_to', type: 'string', format: 'uuid', description: 'The replied-to message uuid, never its row id', nullable: true),
+        new OA\Property(property: 'is_deleted', type: 'boolean'),
+        new OA\Property(
+            property: 'status',
+            type: 'string',
+            enum: ['sent', 'delivered', 'read'],
+            description: 'The ✓ / ✓✓ / ✓✓ blue tick. Only ever set on the caller\'s own messages; null otherwise',
+            nullable: true
+        ),
+        new OA\Property(property: 'created_at', type: 'string', format: 'date-time', nullable: true),
+    ],
+    type: 'object'
+)]
+#[OA\Schema(
+    schema: 'ConversationRow',
+    description: 'A DM-list row. `unread_count` and `is_muted` are the caller\'s own — the same thread looks different to each side.',
+    properties: [
+        new OA\Property(property: 'uuid', type: 'string', format: 'uuid'),
+        new OA\Property(property: 'type', type: 'string', enum: ['direct', 'group']),
+        new OA\Property(property: 'title', type: 'string', description: 'Group threads only', nullable: true),
+        new OA\Property(property: 'avatar_url', type: 'string', nullable: true),
+        new OA\Property(property: 'participants', type: 'array', items: new OA\Items(ref: '#/components/schemas/SocialUserCard'), description: 'Everyone except the caller'),
+        new OA\Property(property: 'last_message', ref: '#/components/schemas/MessageRow', nullable: true),
+        new OA\Property(property: 'last_message_at', type: 'string', format: 'date-time', nullable: true),
+        new OA\Property(property: 'unread_count', type: 'integer', example: 0),
+        new OA\Property(property: 'is_muted', type: 'boolean'),
     ],
     type: 'object'
 )]

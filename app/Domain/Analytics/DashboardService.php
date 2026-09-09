@@ -3,6 +3,7 @@
 namespace App\Domain\Analytics;
 
 use App\Models\DailyStat;
+use App\Models\Room;
 use App\Models\User;
 use App\Models\UserKyc;
 use Illuminate\Support\Carbon;
@@ -14,14 +15,21 @@ use Illuminate\Support\Facades\DB;
  * GFT-013 / GFT-014 / GFT-015 — everything the dashboard shows.
  *
  * **A.2's NFR: no query here touches a raw transaction table.** Money figures come from
- * `daily_stats`; the live counters come from indexed columns on `users` (which is not a
- * ledger) and are cached briefly. If you are tempted to `SUM(amount)` in this class, put
- * it in StatsRollup instead.
+ * `daily_stats`; the live counters come from indexed columns on `users` and `rooms`
+ * (neither is a ledger) and are cached briefly. If you are tempted to `SUM(amount)` in
+ * this class, put it in StatsRollup instead.
  */
 class DashboardService
 {
     /** Short enough to feel live, long enough that a room full of admins is one query. */
     public const KPI_TTL = 10;
+
+    /**
+     * A revenue stream only ever transitions from not-live to live, so the flag can be
+     * cached far longer than the KPIs themselves without going stale in the direction
+     * that matters.
+     */
+    public const STREAM_LIVE_TTL = 3600;
 
     /**
      * A.2a — the counters that update while you watch.
@@ -58,9 +66,11 @@ class DashboardService
                 'queues' => [
                     'kyc_pending' => UserKyc::query()->where('status', UserKyc::PENDING)->count(),
                 ],
-                // Named, and honestly zero, so the tile can say "not built yet" instead of
-                // implying the platform has no live rooms.
-                'rooms' => ['live' => 0, 'available' => false],
+                // A.4 landed the rooms module, so this is a real count now, not a stub.
+                'rooms' => [
+                    'live'      => Room::query()->live()->count(),
+                    'available' => true,
+                ],
                 'as_of' => $now->toIso8601ZuluString(),
             ];
         });
@@ -99,8 +109,15 @@ class DashboardService
             'granularity' => $granularity,
             'from'        => $from->toDateString(),
             'to'          => $to->toDateString(),
-            // Until payments and gifting land, every stream but the admin ones is zero.
-            'streams_live' => ['recharge' => false, 'gifting' => false, 'vip' => false, 'admin' => true],
+            // Derived, not hardcoded: a stream flips live the moment the rollup has ever
+            // recorded real activity for it, so this stops lying the day payments/gifting
+            // land without anyone having to remember to edit this array.
+            'streams_live' => [
+                'recharge' => $this->streamEverPosted('recharge_coins'),
+                'gifting'  => $this->streamEverPosted('gifting_coins'),
+                'vip'      => $this->streamEverPosted('vip_coins'),
+                'admin'    => true,
+            ],
         ];
     }
 
@@ -235,6 +252,23 @@ class DashboardService
     protected function rate(int $part, int $whole): float
     {
         return $whole > 0 ? round($part / $whole, 4) : 0.0;
+    }
+
+    /**
+     * Whether a revenue stream has ever posted through the rollup.
+     *
+     * Read from `daily_stats`, not the ledger — A.2's NFR forbids the dashboard from
+     * scanning a raw transaction table, and this flag only needs to notice that a stream
+     * has started, which the rollup already knows once `StatsRollup` has run over a day
+     * that saw real activity.
+     */
+    protected function streamEverPosted(string $column): bool
+    {
+        return Cache::remember(
+            "cache:dashboard:stream_live:{$column}",
+            self::STREAM_LIVE_TTL,
+            fn () => DailyStat::query()->where($column, '>', 0)->exists(),
+        );
     }
 
     /** Proves the NFR rather than asserting it — used by the test. */

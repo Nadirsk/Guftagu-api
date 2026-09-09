@@ -30,9 +30,20 @@ class User extends Authenticatable
     public const STATUS_DELETED = 'deleted';
 
     protected $fillable = [
-        'uuid', 'guftagu_id', 'phone', 'phone_hash', 'country_code', 'email', 'email_hash',
-        'password', 'status', 'agora_uid', 'last_active_at', 'registered_ip',
-        'consent_version', 'consent_at',
+        'uuid',
+        'guftagu_id',
+        'phone',
+        'phone_hash',
+        'country_code',
+        'email',
+        'email_hash',
+        'password',
+        'status',
+        'agora_uid',
+        'last_active_at',
+        'registered_ip',
+        'consent_version',
+        'consent_at',
     ];
 
     protected $hidden = ['password', 'remember_token', 'phone', 'email', 'phone_hash', 'email_hash'];
@@ -56,11 +67,11 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'phone'          => 'encrypted',
-            'email'          => 'encrypted',
-            'password'       => 'hashed',
+            'phone' => 'encrypted',
+            'email' => 'encrypted',
+            'password' => 'hashed',
             'last_active_at' => 'datetime',
-            'consent_at'     => 'datetime',
+            'consent_at' => 'datetime',
         ];
     }
 
@@ -205,11 +216,11 @@ class User extends Authenticatable
 
         return $query->where(function (Builder $q) use ($term) {
             $q->where('guftagu_id', 'like', "%{$term}%")
-                ->orWhereHas('profile', fn (Builder $p) => $p->where('display_name', 'like', "%{$term}%"));
+                ->orWhereHas('profile', fn(Builder $p) => $p->where('display_name', 'like', "%{$term}%"));
 
             // Try the term as a phone, with and without the default country code, so
             // "9876543210" and "+919876543210" both find the same person.
-            foreach (array_unique([$term, '+91'.ltrim($term, '+'), ltrim($term, '+')]) as $candidate) {
+            foreach (array_unique([$term, '+91' . ltrim($term, '+'), ltrim($term, '+')]) as $candidate) {
                 $q->orWhere('phone_hash', static::hash($candidate));
             }
 
@@ -272,7 +283,7 @@ class User extends Authenticatable
 
         if ($this->relationLoaded('activeSanctions')) {
             return $this->activeSanctions
-                ->contains(fn (UserSanction $s) => in_array($s->type, $blocking, true));
+                ->contains(fn(UserSanction $s) => in_array($s->type, $blocking, true));
         }
 
         return $this->sanctions()
@@ -307,10 +318,10 @@ class User extends Authenticatable
         $local = preg_replace('/\D/', '', $local) ?? '';
 
         if (strlen($local) < 4) {
-            return $country.' '.str_repeat('•', 6);
+            return $country . ' ' . str_repeat('•', 6);
         }
 
-        return $country.' '.substr($local, 0, 2).str_repeat('•', 6).substr($local, -2);
+        return $country . ' ' . substr($local, 0, 2) . str_repeat('•', 6) . substr($local, -2);
     }
 
     public function maskedEmail(): ?string
@@ -321,6 +332,6 @@ class User extends Authenticatable
 
         [$local, $domain] = array_pad(explode('@', $this->email, 2), 2, '');
 
-        return mb_substr($local, 0, 2).str_repeat('•', max(1, mb_strlen($local) - 2)).'@'.$domain;
+        return mb_substr($local, 0, 2) . str_repeat('•', max(1, mb_strlen($local) - 2)) . '@' . $domain;
     }
 }

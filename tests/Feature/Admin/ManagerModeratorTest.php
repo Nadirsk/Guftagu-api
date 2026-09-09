@@ -517,6 +517,34 @@ class ManagerModeratorTest extends TestCase
         $this->assertNull($result['open_rate']);
     }
 
+    #[Test]
+    public function a_manager_can_prepare_a_campaign_and_track_its_outcome_but_cannot_send_it(): void
+    {
+        // B.3b/B.5b: same prepare/send split as banners — a Manager drafts and tracks a
+        // campaign, but sending it (cms.campaign_send, high risk) stays Admin-only.
+        $manager = $this->makeAdmin('Manager', Role::MANAGER);
+
+        $data = $this->actingAs($manager, 'sanctum-admin')
+            ->postJson("{$this->base}/broadcasts", [
+                'title'    => 'Manager campaign',
+                'body'     => 'Prepared by a Manager.',
+                'audience' => 'all',
+                'channels' => ['in_app'],
+            ])
+            ->assertCreated()
+            ->json('data');
+
+        $broadcast = Broadcast::find($data['id']);
+
+        $this->actingAs($manager, 'sanctum-admin')
+            ->getJson("{$this->base}/broadcasts/{$broadcast->id}/outcome")
+            ->assertOk();
+
+        $this->actingAs($manager, 'sanctum-admin')
+            ->postJson("{$this->base}/broadcasts/{$broadcast->id}/send")
+            ->assertStatus(403);
+    }
+
     // -------------------------------------------------------------------- C.3a
 
     #[Test]

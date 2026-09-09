@@ -839,6 +839,13 @@ granted permission — the Moderator role baseline holds almost none of them
 - **D.1a** Given a token issued to device A, when it is presented from device B, then the request is
   refused `401 DEVICE_MISMATCH` and the token is revoked.
 
+**Implementation note (2026-09-08):** GFT-181/182/183 shipped wider than scoped above — email
+joined phone as a first-class identifier, password login sits next to OTP for both, and the
+social providers are Google + Facebook (no Apple), matching the actual onboarding screens
+rather than this ticket's original text. Per-device token binding (the last acceptance
+criterion above) was deliberately deferred: every route issues a single long-lived Sanctum
+token per device instead, no refresh-token rotation. See docs/03 §3 for the shipped contract.
+
 ---
 
 ## D.2 · Voice / Audio Rooms
@@ -1117,6 +1124,15 @@ granted permission — the Moderator role baseline holds almost none of them
   streak to 1 rather than continuing.
 - **D.7d** Given an event with a 500-coin entry, when I join with 400 coins, then joining is refused
   and no partial deduction occurs.
+
+**Implementation note (2026-09-08):** GFT-284 shipped for D.7c — `checkin_rewards` (admin
+ladder) and `daily_checkins` (claim log), `GET/POST /checkin`, `/admin/checkin-rewards`
+CRUD. Reward types are `coins`/`diamonds` only for now, same reasoning as GFT-093's event
+rewards: `frame`/`badge`/`vip_days` have nowhere to actually land without a user-inventory
+table, so they were left out rather than recorded as a grant that doesn't happen. One
+addition beyond the acceptance criteria above: completing day 7 without a gap rolls
+straight into a new cycle at day 1 rather than freezing — the criteria didn't say what day
+8 does, and stopping forever felt wrong for a repeating engagement loop.
 
 ---
 

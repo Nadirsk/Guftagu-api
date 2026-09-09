@@ -35,4 +35,22 @@ return [
         ],
     ],
 
+    // Epic D.1a — mobile social sign-in. The app sends the id/access token it already
+    // obtained from the native SDK; these credentials are only used to verify it server-side.
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+    ],
+
+    'facebook' => [
+        'app_id' => env('FACEBOOK_APP_ID'),
+        'app_secret' => env('FACEBOOK_APP_SECRET'),
+    ],
+
+    // Epic D.1a — phone OTP delivery. Until this is set, OtpService logs the code instead
+    // of sending it (see config/guftagu.php `user_otp`), the same fallback admin MFA uses.
+    'msg91' => [
+        'auth_key' => env('MSG91_AUTH_KEY'),
+        'template_id' => env('MSG91_TEMPLATE_ID'),
+    ],
+
 ];

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AdminAuthController;
+use App\Http\Controllers\Admin\AdminNotificationController;
 use App\Http\Controllers\Admin\AdminPermissionController;
 use App\Http\Controllers\Admin\AdminUserController;
 use App\Http\Controllers\Admin\DashboardController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\Admin\ContentController;
 use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\Admin\GiftController;
 use App\Http\Controllers\Admin\GiftTargetController;
+use App\Http\Controllers\Admin\CheckinRewardController;
 use App\Http\Controllers\Admin\LevelController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\RankingController;
@@ -32,7 +34,9 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\UserWalletController;
 use App\Http\Controllers\Admin\VipTierController;
 use App\Http\Controllers\Admin\WithdrawalController;
+use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BlockController;
+use App\Http\Controllers\Api\CheckinController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\FollowController;
 use App\Http\Controllers\Api\FriendController;
@@ -77,7 +81,32 @@ use Illuminate\Support\Facades\Route;
 
 Route::bind('profile', fn (string $value) => User::where('uuid', $value)->firstOrFail());
 
+/*
+|--------------------------------------------------------------------------
+| Mobile — auth & onboarding (epic D.1a)
+|--------------------------------------------------------------------------
+| Unauthenticated: nothing here has a token yet, so each gets its own throttle rather than
+| mobile-api's per-user limiter, which would key on IP alone for every one of these.
+*/
+Route::prefix('v1')->name('app.auth.')->group(function () {
+    Route::post('auth/otp/send', [AuthController::class, 'sendOtp'])->middleware('throttle:otp-send')->name('otp.send');
+    Route::post('auth/otp/verify', [AuthController::class, 'verifyOtp'])->middleware('throttle:otp-verify')->name('otp.verify');
+    Route::post('auth/login', [AuthController::class, 'loginWithPassword'])->middleware('throttle:auth-login')->name('login');
+    Route::post('auth/social', [AuthController::class, 'socialLogin'])->middleware('throttle:auth-login')->name('social');
+    Route::post('auth/password/forgot', [AuthController::class, 'forgotPassword'])->middleware('throttle:otp-send')->name('password.forgot');
+    Route::post('auth/password/reset', [AuthController::class, 'resetPassword'])->middleware('throttle:otp-verify')->name('password.reset');
+});
+
 Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 'throttle:mobile-api'])->group(function () {
+
+    // ---- auth & onboarding, authenticated half (D.1a)
+    Route::post('auth/logout', [AuthController::class, 'logout'])->name('auth.logout');
+    Route::get('auth/me', [AuthController::class, 'me'])->name('auth.me');
+    Route::post('auth/profile/setup', [AuthController::class, 'setupProfile'])->name('auth.profile.setup');
+
+    // ---- daily check-in (D.7c)
+    Route::get('checkin', [CheckinController::class, 'status'])->name('checkin.status');
+    Route::post('checkin', [CheckinController::class, 'claim'])->name('checkin.claim');
 
     // ---- search (D.3a). Its own throttle — docs/03 §16 caps search at 30/min/user.
     Route::middleware('throttle:search')->group(function () {
@@ -182,6 +211,11 @@ Route::prefix('v1')->group(function () {
             // can correct. No permission key: any admin filling in a form may use it.
             Route::post('translate', [TranslateController::class, 'translate'])
                 ->middleware('throttle:admin-translate')->name('translate');
+
+            // ---- notification inbox (C.5a, general) — your own, every role, no permission key
+            Route::get('notifications', [AdminNotificationController::class, 'index'])->name('notifications.index');
+            Route::post('notifications/read-all', [AdminNotificationController::class, 'markAllRead'])->name('notifications.read_all');
+            Route::post('notifications/{notification}/read', [AdminNotificationController::class, 'markRead'])->name('notifications.read');
 
             // ---- security policy (A.1c, A.1d)
             Route::middleware('permission:settings.manage')->group(function () {
@@ -338,6 +372,15 @@ Route::prefix('v1')->group(function () {
                 Route::post('levels', [LevelController::class, 'store'])->name('levels.store');
                 Route::patch('levels/{level}', [LevelController::class, 'update'])->name('levels.update');
                 Route::post('levels/badge', [LevelController::class, 'uploadBadge'])->name('levels.badge');
+            });
+
+            // ---- daily check-in ladder (D.7c)
+            Route::get('checkin-rewards', [CheckinRewardController::class, 'index'])
+                ->middleware('permission:checkin.view')->name('checkin-rewards.index');
+            Route::middleware('permission:checkin.manage')->group(function () {
+                Route::post('checkin-rewards', [CheckinRewardController::class, 'store'])->name('checkin-rewards.store');
+                Route::patch('checkin-rewards/{checkinReward}', [CheckinRewardController::class, 'update'])->name('checkin-rewards.update');
+                Route::delete('checkin-rewards/{checkinReward}', [CheckinRewardController::class, 'destroy'])->name('checkin-rewards.destroy');
             });
 
             // ---- VIP & cosmetics (A.6c, A.6d)

@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -17,6 +18,15 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureRateLimiters();
+
+        // This app is API-only (mobile + the Vue admin panel), and neither guard has a
+        // 'login' route — the default redirect target Authenticate::redirectTo() builds
+        // eagerly with route('login'). Left alone, that call throws RouteNotFoundException
+        // *before* AuthenticationException is even constructed, which pre-empts the
+        // UNAUTHENTICATED JSON response registered in bootstrap/app.php and surfaces as a
+        // raw 500 instead of a 401 on every unauthenticated request. Returning null here
+        // is what tells Authenticate there is nowhere to redirect to.
+        Authenticate::redirectUsing(fn () => null);
     }
 
     /**
@@ -74,6 +84,34 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('search', function (Request $request) {
             return Limit::perMinute(30)->by($this->actorKey($request));
         });
+
+        // Epic D.1a — "OTP send 3/hour/phone · 10/day/IP" (docs/03 §16), applied to
+        // whichever identifier (email or phone) the request names.
+        RateLimiter::for('otp-send', function (Request $request) {
+            return [
+                Limit::perHour((int) config('guftagu.user_otp.send_per_hour', 3))
+                    ->by('identifier:'.$this->identifierKey($request)),
+                Limit::perDay((int) config('guftagu.user_otp.send_per_day_ip', 10))->by('ip:'.$request->ip()),
+            ];
+        });
+
+        // Tighter than mobile-api: a 6-digit OTP is brute-forceable at higher rates, same
+        // reasoning as admin-mfa.
+        RateLimiter::for('otp-verify', function (Request $request) {
+            return Limit::perMinute(10)->by('ip:'.$request->ip());
+        });
+
+        RateLimiter::for('auth-login', function (Request $request) {
+            return [
+                Limit::perMinute(5)->by('ip:'.$request->ip()),
+                Limit::perMinute(5)->by('identifier:'.$this->identifierKey($request)),
+            ];
+        });
+    }
+
+    protected function identifierKey(Request $request): string
+    {
+        return strtolower(trim((string) ($request->input('email') ?? $request->input('phone') ?? $request->input('token'))));
     }
 
     protected function actorKey(Request $request): string

@@ -91,6 +91,10 @@ class PermissionSeeder extends Seeder
             'view'   => ['View wealth/charm levels', 'low'],
             'manage' => ['Manage wealth/charm levels', 'medium'],
         ],
+        'checkin' => [
+            'view'   => ['View the daily check-in reward ladder', 'low'],
+            'manage' => ['Manage the daily check-in reward ladder', 'medium'],
+        ],
         'economy' => [
             'rates_manage'      => ['Manage conversion rates', 'high'],
             'packages_manage'   => ['Manage recharge packages', 'medium'],

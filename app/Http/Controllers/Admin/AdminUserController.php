@@ -6,12 +6,16 @@ use App\Domain\Access\Services\PermissionResolver;
 use App\Domain\Audit\AuditLogger;
 use App\Http\Controllers\Controller;
 use App\Http\Middleware\EnforceIdleTimeout;
+use App\Mail\AdminWelcomeMail;
 use App\Models\AdminUser;
 use App\Models\Role;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 /**
  * GFT-127 — panel user management. docs/03 §9, behind `access.admin_manage`.
@@ -117,6 +121,20 @@ class AdminUserController extends Controller
             'email' => $admin->email, 'role' => $role->key,
         ]);
 
+        // AdminUser hashes the password on save, so $data['password'] here is the only
+        // place the plaintext still exists. A mail-server hiccup shouldn't undo an
+        // already-persisted account, so this can't fail the request — it's logged instead.
+        try {
+            Mail::to($admin->email)->send(new AdminWelcomeMail(
+                $admin,
+                $data['password'],
+                $role->name,
+                config('guftagu.frontend_url'),
+            ));
+        } catch (Throwable $e) {
+            Log::error('admin.welcome_mail_failed', ['admin_id' => $admin->id, 'message' => $e->getMessage()]);
+        }
+
         return ApiResponse::success($this->payload($admin->load('role:id,key,name')), 'Panel user created', 201);
     }
 
@@ -127,11 +145,16 @@ class AdminUserController extends Controller
     {
         $data = $request->validate([
             'name'                    => ['sometimes', 'string', 'max:150'],
+            'email'                   => ['sometimes', 'string', 'email:filter', 'max:191', Rule::unique('admin_users', 'email')->ignore($admin->id)],
             'phone'                   => ['sometimes', 'nullable', 'string', 'max:20'],
             'role'                    => ['sometimes', 'string', Rule::exists('roles', 'key')],
             'mfa_enabled'             => ['sometimes', 'boolean'],
             'session_timeout_minutes' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:1440'],
         ]);
+
+        if (isset($data['email'])) {
+            $data['email'] = strtolower($data['email']);
+        }
 
         $actor = $request->user();
 
@@ -139,7 +162,7 @@ class AdminUserController extends Controller
             return ApiResponse::error('DELEGATION_TARGET_DENIED', 'You are not allowed to manage that account', null, 403);
         }
 
-        $before = $admin->only(['name', 'phone', 'role_id', 'mfa_enabled', 'session_timeout_minutes']);
+        $before = $admin->only(['name', 'email', 'phone', 'role_id', 'mfa_enabled', 'session_timeout_minutes']);
 
         if (isset($data['role'])) {
             $role = Role::query()->where('key', $data['role'])->firstOrFail();
@@ -156,7 +179,7 @@ class AdminUserController extends Controller
             $admin->role_id = $role->id;
         }
 
-        $admin->fill(array_intersect_key($data, array_flip(['name', 'phone', 'mfa_enabled', 'session_timeout_minutes'])));
+        $admin->fill(array_intersect_key($data, array_flip(['name', 'email', 'phone', 'mfa_enabled', 'session_timeout_minutes'])));
         $admin->save();
 
         // A role change changes the baseline, so the cached set is stale.

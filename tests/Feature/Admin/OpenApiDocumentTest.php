@@ -36,12 +36,43 @@ class OpenApiDocumentTest extends TestCase
     /** @return array<string, true> */
     protected function realRoutes(): array
     {
+        return $this->routesMatching(fn (string $uri) => str_starts_with($uri, 'api/v1/admin'));
+    }
+
+    /**
+     * Every mobile prefix that has been added to this document on purpose — currently epic
+     * D.1a's auth endpoints (MobileAuthPaths) and D.7c's check-in endpoints
+     * (MobileCheckinPaths), added at the requester's ask so they can "Try it out" against a
+     * running backend. Deliberately narrower than "every mobile route": the mobile API is
+     * normally documented in docs/03-api-contract.md instead, so this allowlist only grows
+     * as more mobile paths are added here on purpose — it is not meant to eventually cover
+     * the whole mobile surface.
+     */
+    protected const DOCUMENTED_MOBILE_PREFIXES = ['api/v1/auth/', 'api/v1/checkin'];
+
+    /** @return array<string, true> */
+    protected function documentedMobileRoutes(): array
+    {
+        return $this->routesMatching(function (string $uri) {
+            foreach (self::DOCUMENTED_MOBILE_PREFIXES as $prefix) {
+                if (str_starts_with($uri, $prefix)) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+    }
+
+    /** @return array<string, true> */
+    protected function routesMatching(callable $matches): array
+    {
         $real = [];
 
         foreach (Route::getRoutes() as $route) {
             $uri = $route->uri();
 
-            if (! str_starts_with($uri, 'api/v1/admin')) {
+            if (! $matches($uri)) {
                 continue;
             }
 
@@ -88,6 +119,7 @@ class OpenApiDocumentTest extends TestCase
         $phantom = array_diff_key(
             $this->documentedOperations($this->document()),
             $this->realRoutes(),
+            $this->documentedMobileRoutes(),
         );
 
         foreach (self::LOCAL_ONLY as $localOnly) {
@@ -168,6 +200,13 @@ class OpenApiDocumentTest extends TestCase
             'POST /admin/auth/login',
             'POST /admin/auth/mfa/verify',
             'GET /admin/dev/last-otp',
+            // Epic D.1a — nothing has a token yet at any of these (see routes/api.php).
+            'POST /auth/otp/send',
+            'POST /auth/otp/verify',
+            'POST /auth/login',
+            'POST /auth/social',
+            'POST /auth/password/forgot',
+            'POST /auth/password/reset',
         ];
 
         $missingSecurity = [];

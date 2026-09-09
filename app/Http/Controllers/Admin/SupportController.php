@@ -280,9 +280,20 @@ class SupportController extends Controller
     {
         return match ($message->sender_type) {
             SupportTicketMessage::FROM_ADMIN => AdminUser::find($message->sender_id)?->name,
-            SupportTicketMessage::FROM_USER  => User::find($message->sender_id)?->guftagu_id,
+            SupportTicketMessage::FROM_USER  => $this->userSenderName($message->sender_id),
             default                          => null,
         };
+    }
+
+    /** "Ismail Shaikh (GF8420100)" — the id alone doesn't tell staff who they're replying to. */
+    protected function userSenderName(?int $userId): ?string
+    {
+        $user = User::with('profile')->find($userId);
+        if (! $user) return null;
+
+        $name = $user->profile?->display_name;
+
+        return $name ? "{$name} ({$user->guftagu_id})" : $user->guftagu_id;
     }
 
     protected function rowPayload(SupportTicket $ticket): array

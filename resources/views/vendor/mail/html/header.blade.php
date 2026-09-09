@@ -12,8 +12,8 @@
 </svg>
 </td>
 <td style="vertical-align: middle; text-align: left;">
-<div style="font-size: 16px; font-weight: 600; letter-spacing: -0.2px; color: #eef2f7; line-height: 1.2;">{{ $slot }}</div>
-<div style="font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #5d6b81; line-height: 1.2;">Console</div>
+<div style="font-size: 16px; font-weight: 600; letter-spacing: -0.2px; color: #1f2430; line-height: 1.2;">{{ $slot }}</div>
+<div style="font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #8a93a3; line-height: 1.2;">Console</div>
 </td>
 </tr>
 </table>

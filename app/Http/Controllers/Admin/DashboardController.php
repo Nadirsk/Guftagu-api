@@ -6,6 +6,7 @@ use App\Domain\Access\Exceptions\ScopeException;
 use App\Domain\Access\Services\ScopeFilter;
 use App\Domain\Analytics\DashboardService;
 use App\Domain\Analytics\ScopedDashboard;
+use App\Domain\Reports\ReportEngine;
 use App\Http\Controllers\Controller;
 use App\Jobs\BuildReportExport;
 use App\Models\ReportExport;
@@ -29,6 +30,7 @@ class DashboardController extends Controller
         protected DashboardService $dashboard,
         protected ScopedDashboard $scoped,
         protected ScopeFilter $scope,
+        protected ReportEngine $engine,
     ) {
     }
 
@@ -80,18 +82,40 @@ class DashboardController extends Controller
 
         $data = $request->validate([
             'type'   => ['required', Rule::in(['revenue'])],
-            'format' => ['sometimes', Rule::in(['csv'])],
+            'format' => ['sometimes', Rule::in(['csv', 'pdf'])],
             'from'   => ['sometimes', 'date'],
             'to'     => ['sometimes', 'date'],
         ]);
 
         [$from, $to] = $this->range($request);
+        $format = $data['format'] ?? 'csv';
+        $filters = ['from' => $from->toDateString(), 'to' => $to->toDateString()];
+
+        // Same guard the Report Centre applies before queuing — dompdf builds the whole
+        // document in memory, so a report over the cap is refused here rather than left to
+        // fail inside the worker.
+        if ($format === 'pdf') {
+            $total = $this->engine->count($data['type'], $filters);
+
+            if ($total > ReportEngine::PDF_ROW_CAP) {
+                return ApiResponse::error(
+                    'TOO_LARGE_FOR_PDF',
+                    sprintf(
+                        '%s rows is too large to lay out as a PDF (the cap is %s). Export it as CSV instead.',
+                        number_format($total),
+                        number_format(ReportEngine::PDF_ROW_CAP),
+                    ),
+                    null,
+                    422,
+                );
+            }
+        }
 
         $export = ReportExport::create([
             'admin_user_id' => $request->user()->id,
             'type'          => $data['type'],
-            'format'        => $data['format'] ?? 'csv',
-            'filters'       => ['from' => $from->toDateString(), 'to' => $to->toDateString()],
+            'format'        => $format,
+            'filters'       => $filters,
             'status'        => ReportExport::QUEUED,
         ]);
 
@@ -152,7 +176,7 @@ class DashboardController extends Controller
 
         return Storage::disk('local')->download(
             $export->file_path,
-            "guftagu-{$export->type}-{$export->filters['from']}-to-{$export->filters['to']}.csv",
+            "guftagu-{$export->type}-{$export->filters['from']}-to-{$export->filters['to']}.{$export->format}",
         );
     }
 

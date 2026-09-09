@@ -73,6 +73,74 @@ class WalletService
             throw new WalletException('INVALID_DIRECTION', 'Direction must be credit or debit.', 422);
         }
 
+        $transaction = $this->move(
+            $user, $currency, $direction, $amount,
+            $direction === LedgerTransaction::CREDIT ? LedgerTransaction::TYPE_ADMIN_CREDIT : LedgerTransaction::TYPE_ADMIN_DEBIT,
+            $actor->id, trim($note), $idempotencyKey,
+        );
+
+        // Audited after commit, so a rolled-back adjustment leaves no record claiming it happened.
+        $this->audit->log(
+            $actor,
+            $direction === LedgerTransaction::CREDIT ? 'wallet.manual_credit' : 'wallet.manual_debit',
+            'wallet',
+            User::class,
+            $user->id,
+            ['balance' => $transaction->balance_before],
+            [
+                'balance'   => $transaction->balance_after,
+                'currency'  => $currency,
+                'amount'    => $amount,
+                'note'      => $transaction->note,
+                'ledger_id' => $transaction->uuid,
+            ],
+        );
+
+        return $transaction;
+    }
+
+    /**
+     * A system-granted credit — no admin actor, no admin audit row. Used by features like
+     * the daily check-in reward (D.7c), where the "why" already lives in the caller's own
+     * table (e.g. `daily_checkins`) rather than needing a note.
+     *
+     * @param  'coin'|'diamond'  $currency
+     *
+     * @throws WalletException
+     */
+    public function creditSystem(
+        User $user,
+        string $currency,
+        int $amount,
+        string $type,
+        ?string $idempotencyKey = null,
+    ): LedgerTransaction {
+        if ($amount <= 0) {
+            throw new WalletException('INVALID_AMOUNT', 'The amount must be a positive whole number.');
+        }
+
+        if (! in_array($currency, [Wallet::COIN, Wallet::DIAMOND], true)) {
+            throw new WalletException('INVALID_CURRENCY', 'Currency must be coin or diamond.', 422);
+        }
+
+        return $this->move($user, $currency, LedgerTransaction::CREDIT, $amount, $type, null, null, $idempotencyKey);
+    }
+
+    /**
+     * The locking, balance-move and ledger-write shared by every credit/debit path (§15
+     * rules 2, 4, 5, 7). Callers validate their own preconditions (amount, currency,
+     * direction, note) before reaching here — this only ever moves money.
+     */
+    protected function move(
+        User $user,
+        string $currency,
+        string $direction,
+        int $amount,
+        string $type,
+        ?int $performedBy,
+        ?string $note,
+        ?string $idempotencyKey,
+    ): LedgerTransaction {
         // Replays return the original row rather than moving money twice (§15 rule 7).
         if ($idempotencyKey !== null) {
             $existing = $this->modelFor($currency)::query()
@@ -84,8 +152,8 @@ class WalletService
             }
         }
 
-        $transaction = DB::transaction(function () use (
-            $user, $currency, $direction, $amount, $note, $actor, $idempotencyKey
+        return DB::transaction(function () use (
+            $user, $currency, $direction, $amount, $type, $performedBy, $note, $idempotencyKey
         ) {
             // §15 rule 5 — lock before reading a balance that precedes a write. Without
             // this, two concurrent adjustments both read the same "before" and one is lost.
@@ -122,33 +190,12 @@ class WalletService
                 'amount'          => $amount,
                 'balance_before'  => $before,
                 'balance_after'   => $after,
-                'type'            => $direction === LedgerTransaction::CREDIT
-                    ? LedgerTransaction::TYPE_ADMIN_CREDIT
-                    : LedgerTransaction::TYPE_ADMIN_DEBIT,
+                'type'            => $type,
                 'idempotency_key' => $idempotencyKey,
-                'performed_by'    => $actor->id,
-                'note'            => trim($note),
+                'performed_by'    => $performedBy,
+                'note'            => $note,
             ]);
         });
-
-        // Audited after commit, so a rolled-back adjustment leaves no record claiming it happened.
-        $this->audit->log(
-            $actor,
-            $direction === LedgerTransaction::CREDIT ? 'wallet.manual_credit' : 'wallet.manual_debit',
-            'wallet',
-            User::class,
-            $user->id,
-            ['balance' => $transaction->balance_before],
-            [
-                'balance'   => $transaction->balance_after,
-                'currency'  => $currency,
-                'amount'    => $amount,
-                'note'      => $transaction->note,
-                'ledger_id' => $transaction->uuid,
-            ],
-        );
-
-        return $transaction;
     }
 
     /** GFT-030 — an admin freeze blocks the user, not the admin. */

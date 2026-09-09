@@ -100,6 +100,7 @@ use OpenApi\Attributes as OA;
     requestBody: new OA\RequestBody(
         content: new OA\JsonContent(properties: [
             new OA\Property(property: 'name', type: 'string'),
+            new OA\Property(property: 'email', type: 'string', format: 'email', description: 'The sign-in email — must stay unique across panel users'),
             new OA\Property(property: 'phone', type: 'string', nullable: true),
             new OA\Property(property: 'role', type: 'string', enum: ['admin', 'manager', 'moderator']),
             new OA\Property(property: 'mfa_enabled', type: 'boolean', description: 'Per-account opt-in; can only add to the role policy, never disable it'),
@@ -109,6 +110,7 @@ use OpenApi\Attributes as OA;
     responses: [
         new OA\Response(response: 200, description: 'Panel user updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
         new OA\Response(response: 403, description: '`DELEGATION_TARGET_DENIED` — not allowed to manage that account, or assign that role', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — e.g. the email is already in use by another panel user', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]
 #[OA\Post(

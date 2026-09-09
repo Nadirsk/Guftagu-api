@@ -192,6 +192,10 @@ MD,
 #[OA\Patch(
     path: '/admin/users/{user}',
     summary: 'Edit a user profile',
+    description: '`phone` and `email` are accepted only from Super Admin — anyone else sending either field '
+        . 'gets a `VALIDATION_ERROR` back (`prohibited`), same as `AdminAuthController::updateProfile`\'s own '
+        . 'email gate. Real users onboard through the app\'s own phone/OTP flow, so moving them off it is '
+        . 'deliberately a Super Admin-only, audit-logged act (`user.contact_update`).',
     security: [['bearerAuth' => []]],
     tags: ['Users'],
     parameters: [new OA\Parameter(name: 'user', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -203,6 +207,8 @@ MD,
         new OA\Property(property: 'gender', type: 'string', nullable: true),
         new OA\Property(property: 'date_of_birth', type: 'string', format: 'date', nullable: true),
         new OA\Property(property: 'language', type: 'string', nullable: true, example: 'en'),
+        new OA\Property(property: 'phone', type: 'string', maxLength: 20, description: 'Super Admin only', example: '+919876543210'),
+        new OA\Property(property: 'email', type: 'string', nullable: true, description: 'Super Admin only'),
     ])),
     responses: [
         new OA\Response(
@@ -215,6 +221,7 @@ MD,
             ])
         ),
         new OA\Response(response: 403, description: '`PERMISSION_DENIED` — needs `users.edit`', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — `phone`/`email` sent by a non-Super-Admin, or either already in use by another user', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]
 #[OA\Post(

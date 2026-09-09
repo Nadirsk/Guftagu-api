@@ -76,6 +76,10 @@ class RoleSeeder extends Seeder
         'events.view',
         'events.manage',
         'cms.banner_manage',
+        // B.3b/B.5b: a Manager prepares and tracks a campaign's outcome; sending it needs
+        // `cms.campaign_send` (high risk), which stays Admin-only — the same prepare/send
+        // split as banner_manage/banner_approve.
+        'cms.announcement_manage',
         // B.4 is a Manager epic, so first-level support is baseline for them.
         'support.view',
         'support.reply',
