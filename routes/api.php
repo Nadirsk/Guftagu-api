@@ -19,6 +19,7 @@ use App\Http\Controllers\Admin\CheckinRewardController;
 use App\Http\Controllers\Admin\LevelController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\RankingController;
+use App\Http\Controllers\Admin\RewardCatalogController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\RoomCatalogueController;
 use App\Http\Controllers\Admin\ModerationController;
@@ -38,6 +39,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BlockController;
 use App\Http\Controllers\Api\CheckinController;
 use App\Http\Controllers\Api\ConversationController;
+use App\Http\Controllers\Api\EventController as AppEventController;
 use App\Http\Controllers\Api\FollowController;
 use App\Http\Controllers\Api\FriendController;
 use App\Http\Controllers\Api\MessageController;
@@ -107,6 +109,12 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     // ---- daily check-in (D.7c)
     Route::get('checkin', [CheckinController::class, 'status'])->name('checkin.status');
     Route::post('checkin', [CheckinController::class, 'claim'])->name('checkin.claim');
+
+    // ---- campaign events: Recharge Activity, Weekly Star (A.9, D.7)
+    Route::get('events', [AppEventController::class, 'index'])->name('events.index');
+    Route::get('events/{eventUuid}', [AppEventController::class, 'show'])->name('events.show');
+    Route::post('events/{eventUuid}/tiers/{tierId}/claim', [AppEventController::class, 'claim'])
+        ->name('events.tiers.claim');
 
     // ---- search (D.3a). Its own throttle — docs/03 §16 caps search at 30/min/user.
     Route::middleware('throttle:search')->group(function () {
@@ -483,6 +491,38 @@ Route::prefix('v1')->group(function () {
                 Route::post('events/{event}/rewards', [EventController::class, 'addReward'])->name('events.rewards.store');
                 Route::delete('events/{event}/rewards/{reward}', [EventController::class, 'removeReward'])->name('events.rewards.destroy');
                 Route::post('events/{event}/distribute', [EventController::class, 'distribute'])->name('events.distribute');
+            });
+
+            // ---- campaign event tiers — recharge_activity, weekly_star (the Event Builder)
+            Route::get('events/{event}/tiers', [EventController::class, 'tiers'])
+                ->middleware('permission:events.view')->name('events.tiers.index');
+            Route::get('events/{event}/progress', [EventController::class, 'progress'])
+                ->middleware('permission:events.view')->name('events.progress');
+
+            Route::middleware('permission:events.manage')->group(function () {
+                Route::post('events/{event}/tiers', [EventController::class, 'addTier'])->name('events.tiers.store');
+                Route::patch('events/{event}/tiers/{tier}', [EventController::class, 'updateTier'])->name('events.tiers.update');
+                Route::delete('events/{event}/tiers/{tier}', [EventController::class, 'removeTier'])->name('events.tiers.destroy');
+            });
+
+            Route::middleware('permission:events.reward_manage')->group(function () {
+                Route::post('events/{event}/tiers/{tier}/rewards', [EventController::class, 'addTierReward'])->name('events.tiers.rewards.store');
+                Route::delete('events/{event}/tiers/{tier}/rewards/{reward}', [EventController::class, 'removeTierReward'])->name('events.tiers.rewards.destroy');
+                Route::post('events/{event}/distribute-tiers', [EventController::class, 'distributeTiers'])->name('events.tiers.distribute');
+                Route::post('events/{event}/manual-fulfillments/{claim}', [EventController::class, 'fulfillManual'])->name('events.manual_fulfillments.fulfill');
+            });
+
+            Route::get('events/{event}/manual-fulfillments', [EventController::class, 'manualFulfillments'])
+                ->middleware('permission:events.view')->name('events.manual_fulfillments.index');
+
+            // ---- reward catalog — the admin-manageable list every event's tier bundles draw from
+            Route::get('reward-catalog', [RewardCatalogController::class, 'index'])
+                ->middleware('permission:events.view')->name('reward-catalog.index');
+
+            Route::middleware('permission:events.reward_manage')->group(function () {
+                Route::post('reward-catalog', [RewardCatalogController::class, 'store'])->name('reward-catalog.store');
+                Route::patch('reward-catalog/{rewardCatalogItem}', [RewardCatalogController::class, 'update'])->name('reward-catalog.update');
+                Route::delete('reward-catalog/{rewardCatalogItem}', [RewardCatalogController::class, 'destroy'])->name('reward-catalog.destroy');
             });
 
             // ---- rankings (A.9c/d)

@@ -235,6 +235,221 @@ MD,
     ]
 )]
 
+// --------------------------------------------------------- campaign event tiers
+// recharge_activity (tier_type=threshold) and weekly_star (tier_type=rank_range) — the
+// Event Builder. See EventTier/EventTierReward for why these carry a reward *bundle*
+// rather than the single reward_type/value a rank band or ranking band carries.
+
+#[OA\Get(
+    path: '/admin/events/{event}/tiers',
+    summary: 'A campaign event\'s ladder (recharge_activity, weekly_star)',
+    description: 'Each tier is either a recharge `threshold` ("300K") or a leaderboard `rank_range` ("Top 1"), with its full reward bundle nested under `rewards`.',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/events/{event}/tiers',
+    summary: 'Add a tier',
+    description: 'Thresholds must be unique and rank ranges must not overlap within the same event — the same reasoning as an EventReward band.',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+        required: ['tier_type', 'label'],
+        properties: [
+            new OA\Property(property: 'tier_type', type: 'string', enum: ['threshold', 'rank_range']),
+            new OA\Property(property: 'period', type: 'string', enum: ['daily', 'weekly', 'monthly'], nullable: true, description: 'Overrides the event\'s own period — lets one event carry both a daily and a monthly ladder'),
+            new OA\Property(property: 'threshold_value', type: 'integer', description: 'threshold tiers only', example: 300000),
+            new OA\Property(property: 'rank_from', type: 'integer', description: 'rank_range tiers only'),
+            new OA\Property(property: 'rank_to', type: 'integer', description: 'rank_range tiers only'),
+            new OA\Property(property: 'label', type: 'string', example: '300K'),
+            new OA\Property(property: 'image_url', type: 'string', nullable: true),
+            new OA\Property(property: 'sort_order', type: 'integer'),
+        ]
+    )),
+    responses: [
+        new OA\Response(response: 201, description: 'Added', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — overlapping range or duplicate threshold', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Patch(
+    path: '/admin/events/{event}/tiers/{tier}',
+    summary: 'Edit a tier',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [
+        new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        new OA\Parameter(name: 'tier', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+    ],
+    requestBody: new OA\RequestBody(content: new OA\JsonContent(type: 'object')),
+    responses: [new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Delete(
+    path: '/admin/events/{event}/tiers/{tier}',
+    summary: 'Remove a tier',
+    description: 'Refused once anyone has claimed it.',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [
+        new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        new OA\Parameter(name: 'tier', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+    ],
+    responses: [
+        new OA\Response(response: 200, description: 'Removed', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 400, description: '`BAD_REQUEST` — already claimed', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Post(
+    path: '/admin/events/{event}/tiers/{tier}/rewards',
+    summary: 'Add a reward line to a tier\'s bundle',
+    description: 'References a row in the reward catalog (`GET /admin/reward-catalog`) — `reward_value`/`duration_days` are this particular use\'s amount/length, which the same catalog entry (e.g. "Coins") can differ by every time it is used.',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [
+        new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        new OA\Parameter(name: 'tier', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+    ],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+        required: ['reward_catalog_id'],
+        properties: [
+            new OA\Property(property: 'reward_catalog_id', type: 'integer'),
+            new OA\Property(property: 'reward_value', type: 'integer', nullable: true, description: 'Amount, for a coins/diamonds catalog entry'),
+            new OA\Property(property: 'duration_days', type: 'integer', nullable: true, description: 'Length, for a vip/frame/chat_bubble/entry_effect/badge catalog entry'),
+            new OA\Property(property: 'label', type: 'string', nullable: true),
+            new OA\Property(property: 'sort_order', type: 'integer'),
+        ]
+    )),
+    responses: [new OA\Response(response: 201, description: 'Added', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Delete(
+    path: '/admin/events/{event}/tiers/{tier}/rewards/{reward}',
+    summary: 'Remove a reward line',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [
+        new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        new OA\Parameter(name: 'tier', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        new OA\Parameter(name: 'reward', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+    ],
+    responses: [new OA\Response(response: 200, description: 'Removed', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Get(
+    path: '/admin/events/{event}/progress',
+    summary: 'Standings preview — this event\'s board or progress leaderboard',
+    description: 'A `weekly_star` event returns `board` (delegated to its RankingRule); a threshold event returns `progress`, the live per-user recharge totals for a `period` query param (defaults to the event\'s own period).',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [
+        new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        new OA\Parameter(name: 'period', in: 'query', schema: new OA\Schema(type: 'string', enum: ['daily', 'weekly', 'monthly'])),
+    ],
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/events/{event}/distribute-tiers',
+    summary: 'Distribute a weekly_star event\'s rank-band bundles',
+    description: <<<'MD'
+The rank-band counterpart to `POST /admin/events/{event}/distribute` — a rank is not final
+until the period closes, so it is admin-distributed rather than user-claimed. Requires a
+`LeaderboardSnapshot` for the period already (`POST /admin/ranking-rules/{rule}/snapshot`).
+Idempotent: a unique index on (tier, user, period) means re-running pays nothing further.
+MD,
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(content: new OA\JsonContent(properties: [
+        new OA\Property(property: 'period_start', type: 'string', format: 'date', description: 'Defaults to the current period'),
+    ])),
+    responses: [
+        new OA\Response(response: 200, description: 'Distributed', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 404, description: '`NOT_FOUND` — no snapshot for that period yet', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Get(
+    path: '/admin/events/{event}/manual-fulfillments',
+    summary: 'Reward lines waiting on support to fulfil by hand',
+    description: 'A claim\'s reward line whose catalog entry has `handler_key: manual` grants nothing automatically — this lists every one still outstanding for this event.',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/events/{event}/manual-fulfillments/{claim}',
+    summary: 'Mark one manual reward line as fulfilled',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [
+        new OA\Parameter(name: 'event', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        new OA\Parameter(name: 'claim', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+    ],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+        required: ['line_index'],
+        properties: [new OA\Property(property: 'line_index', type: 'integer', minimum: 0)]
+    )),
+    responses: [new OA\Response(response: 200, description: 'Marked fulfilled', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+
+// ---------------------------------------------------------------- reward catalog
+
+#[OA\Get(
+    path: '/admin/reward-catalog',
+    summary: 'The reward catalog every event\'s tier bundles draw from',
+    description: <<<'MD'
+Adding a genuinely new kind of reward is a row here, not a code change: `handler_key` is
+one of the automated grant paths (`coins`, `diamonds`, `vip`, `frame`, `chat_bubble`,
+`entry_effect`, `badge`) — each of which needs `handler_ref_id` pointing at the specific
+VIP tier/store item/badge — or `manual` for anything with no handler yet, which still
+shows in the app and still gets claimed, but only records the claim for support to
+fulfil outside the system.
+MD,
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [new OA\Parameter(name: 'include_inactive', in: 'query', schema: new OA\Schema(type: 'boolean'))],
+    responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/reward-catalog',
+    summary: 'Add a reward to the catalog',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+        required: ['name', 'handler_key'],
+        properties: [
+            new OA\Property(property: 'name', type: 'string', example: 'VIP Gold'),
+            new OA\Property(property: 'icon_url', type: 'string', nullable: true),
+            new OA\Property(property: 'description', type: 'string', nullable: true),
+            new OA\Property(property: 'handler_key', type: 'string', enum: ['coins', 'diamonds', 'vip', 'frame', 'chat_bubble', 'entry_effect', 'badge', 'manual']),
+            new OA\Property(property: 'handler_ref_id', type: 'integer', nullable: true, description: 'Required for vip/frame/chat_bubble/entry_effect/badge'),
+            new OA\Property(property: 'is_active', type: 'boolean'),
+        ]
+    )),
+    responses: [
+        new OA\Response(response: 201, description: 'Added', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — missing or unmatched handler_ref_id', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
+)]
+#[OA\Patch(
+    path: '/admin/reward-catalog/{rewardCatalogItem}',
+    summary: 'Edit a catalog entry',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [new OA\Parameter(name: 'rewardCatalogItem', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    requestBody: new OA\RequestBody(content: new OA\JsonContent(type: 'object')),
+    responses: [new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Delete(
+    path: '/admin/reward-catalog/{rewardCatalogItem}',
+    summary: 'Remove a catalog entry',
+    description: 'Deactivated instead of deleted once any tier bundle already references it.',
+    security: [['bearerAuth' => []]],
+    tags: ['Events'],
+    parameters: [new OA\Parameter(name: 'rewardCatalogItem', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    responses: [new OA\Response(response: 200, description: 'Removed or deactivated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+
 // -------------------------------------------------------------------- rankings
 
 #[OA\Get(

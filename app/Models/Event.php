@@ -30,11 +30,48 @@ class Event extends Model
     public const LIVE = 'live';
     public const ENDED = 'ended';
 
-    public const TYPES = ['event', 'tournament', 'lucky_draw'];
+    public const TYPES = ['event', 'tournament', 'lucky_draw', 'recharge_activity', 'weekly_star', 'custom'];
+
+    /**
+     * Template-driven types — the ones built on event_tiers/event_progress/event_claims.
+     * `recharge_activity` and `weekly_star` keep their own dedicated mechanisms
+     * (recharge_amount; a RankingRule via ranking_rule_key) exactly as before —
+     * `custom` is the general case: any progress metric, any tier_type, fixed dates or
+     * a recurring period, entirely admin-configured. Eligibility for the builder is
+     * membership in this list, not a stored flag — see `isCampaign()`.
+     */
+    public const CAMPAIGN_TYPES = ['recharge_activity', 'weekly_star', 'custom'];
+
+    public const PERIODS = ['daily', 'weekly', 'monthly'];
+
+    /**
+     * What a campaign event's progress (threshold tiers) or standings (rank_range
+     * tiers, when not riding a RankingRule) measure — see EventCampaignService.
+     * `gift_value`/`gift_count` read `metric_ref_id`/`metric_ref_type` to optionally
+     * narrow to one specific gift or gift category.
+     */
+    public const PROGRESS_METRICS = ['recharge_amount', 'coins_spent', 'diamonds_earned', 'gift_value', 'gift_count'];
+
+    public const METRIC_REF_TYPES = ['gift', 'gift_category'];
+
+    /**
+     * The block library a campaign screen is composed from (docs/03 — Event Builder).
+     * `layout` is an ordered array of `{id, type, config, style}` instances of these —
+     * an admin adds, reorders, configures and styles them; the app only ever needs to
+     * know this one set of block types, so a new *screen* never needs a code change,
+     * only new blocks in the array. `text`/`image`/`spacer` exist so a layout is never
+     * boxed into only the campaign-specific blocks.
+     */
+    public const BLOCK_TYPES = [
+        'banner', 'countdown', 'my_progress_card', 'tier_grid', 'tabs',
+        'leaderboard_list', 'reward_bundle_card', 'rules_button',
+        'text', 'image', 'spacer',
+    ];
 
     protected $fillable = [
-        'uuid', 'type', 'title_en', 'title_hi', 'description', 'banner_url', 'rules',
-        'entry_type', 'entry_cost', 'eligibility', 'starts_at', 'ends_at', 'status',
+        'uuid', 'type', 'title_en', 'title_hi', 'description', 'banner_url', 'rules', 'layout',
+        'entry_type', 'entry_cost', 'eligibility', 'starts_at', 'ends_at', 'period',
+        'progress_metric', 'metric_ref_id', 'metric_ref_type', 'ranking_rule_key', 'status',
         'created_by', 'approved_by', 'max_participants', 'is_featured',
     ];
 
@@ -57,12 +94,14 @@ class Event extends Model
     {
         return [
             'rules'            => 'array',
+            'layout'           => 'array',
             'eligibility'      => 'array',
             'starts_at'        => 'datetime',
             'ends_at'          => 'datetime',
             'entry_cost'       => 'integer',
             'max_participants' => 'integer',
             'is_featured'      => 'boolean',
+            'metric_ref_id'    => 'integer',
         ];
     }
 
@@ -81,6 +120,27 @@ class Event extends Model
     public function claims(): HasMany
     {
         return $this->hasMany(EventRewardClaim::class);
+    }
+
+    /** Campaign types only (recharge_activity, weekly_star). */
+    public function tiers(): HasMany
+    {
+        return $this->hasMany(EventTier::class)->orderBy('sort_order');
+    }
+
+    public function progress(): HasMany
+    {
+        return $this->hasMany(EventProgress::class);
+    }
+
+    public function tierClaims(): HasMany
+    {
+        return $this->hasMany(EventClaim::class);
+    }
+
+    public function isCampaign(): bool
+    {
+        return in_array($this->type, self::CAMPAIGN_TYPES, true);
     }
 
     public function luckyDraw(): HasOne

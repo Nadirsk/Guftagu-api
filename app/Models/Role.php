@@ -12,6 +12,7 @@ class Role extends Model
     public const ADMIN       = 'admin';
     public const MANAGER     = 'manager';
     public const MODERATOR   = 'moderator';
+    public const IT_ADMIN    = 'it_admin';
 
     protected $fillable = ['key', 'name', 'description', 'is_system'];
 

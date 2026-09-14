@@ -22,14 +22,15 @@ class DemoAdminsSeeder extends Seeder
     public const PASSWORD = 'Guftagu@2026';
 
     public const ACCOUNTS = [
-        ['Ops Admin', 'admin@guftagu.local', Role::ADMIN],
-        ['Ops Manager', 'manager@guftagu.local', Role::MANAGER],
-        ['Night Moderator', 'moderator@guftagu.local', Role::MODERATOR],
+        ['Ops Admin', 'admin@gmail.com', Role::ADMIN],
+        ['Ops Manager', 'manager@gmail.com', Role::MANAGER],
+        ['Night Moderator', 'moderator@gmail.com', Role::MODERATOR],
+        ['IT Admin', 'itadmin@gmail.com', Role::IT_ADMIN],
     ];
 
     public function run(): void
     {
-        if (! app()->environment(['local', 'testing'])) {
+        if (!app()->environment(['local', 'testing'])) {
             $this->command->error('DemoAdminsSeeder refuses to run outside local/testing.');
 
             return;
@@ -57,11 +58,11 @@ class DemoAdminsSeeder extends Seeder
             }
 
             AdminUser::create([
-                'name'       => $name,
-                'email'      => $email,
-                'password'   => self::PASSWORD,
-                'role_id'    => $roleId,
-                'status'     => 'active',
+                'name' => $name,
+                'email' => $email,
+                'password' => self::PASSWORD,
+                'role_id' => $roleId,
+                'status' => 'active',
                 'created_by' => $superAdminId,
                 // No per-account opt-in. Note this does NOT disable MFA: the role policy
                 // governs and can only be added to, so `admin` still gets a challenge
@@ -74,7 +75,7 @@ class DemoAdminsSeeder extends Seeder
             $this->command->info(sprintf('%-18s %-26s %-10s %s', $name, $email, $roleKey, $mfa));
         }
 
-        $this->command->info('Password for all of the above: '.self::PASSWORD);
+        $this->command->info('Password for all of the above: ' . self::PASSWORD);
         $this->command->info('Where MFA applies, read the code from GET /api/v1/admin/dev/last-otp.');
     }
 }

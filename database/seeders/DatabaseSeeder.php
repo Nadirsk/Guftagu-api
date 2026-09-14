@@ -26,6 +26,8 @@ class DatabaseSeeder extends Seeder
             RoomCatalogueSeeder::class,
             RoomSeatTemplateSeeder::class,
             RankingRuleSeeder::class,
+            // Needs charm_weekly (RankingRuleSeeder) and the VIP ladder (VipTierSeeder).
+            CampaignEventSeeder::class,
             WealthCharmLevelSeeder::class,
             SuperAdminSeeder::class,
         ]);

@@ -8300,6 +8300,794 @@
                 ]
             }
         },
+        "/admin/events/{event}/tiers": {
+            "get": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "A campaign event's ladder (recharge_activity, weekly_star)",
+                "description": "Each tier is either a recharge `threshold` (\"300K\") or a leaderboard `rank_range` (\"Top 1\"), with its full reward bundle nested under `rewards`.",
+                "operationId": "534cb4756f001c4eb3f8163d525a163d",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Add a tier",
+                "description": "Thresholds must be unique and rank ranges must not overlap within the same event — the same reasoning as an EventReward band.",
+                "operationId": "6492f65db1a8ec55d8289e0fa19e729b",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "tier_type",
+                                    "label"
+                                ],
+                                "properties": {
+                                    "tier_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "threshold",
+                                            "rank_range"
+                                        ]
+                                    },
+                                    "period": {
+                                        "description": "Overrides the event's own period — lets one event carry both a daily and a monthly ladder",
+                                        "type": "string",
+                                        "nullable": true,
+                                        "enum": [
+                                            "daily",
+                                            "weekly",
+                                            "monthly"
+                                        ]
+                                    },
+                                    "threshold_value": {
+                                        "description": "threshold tiers only",
+                                        "type": "integer",
+                                        "example": 300000
+                                    },
+                                    "rank_from": {
+                                        "description": "rank_range tiers only",
+                                        "type": "integer"
+                                    },
+                                    "rank_to": {
+                                        "description": "rank_range tiers only",
+                                        "type": "integer"
+                                    },
+                                    "label": {
+                                        "type": "string",
+                                        "example": "300K"
+                                    },
+                                    "image_url": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "sort_order": {
+                                        "type": "integer"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Added",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — overlapping range or duplicate threshold",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/events/{event}/tiers/{tier}": {
+            "delete": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Remove a tier",
+                "description": "Refused once anyone has claimed it.",
+                "operationId": "ff16485e46ffaa81d9c48e9ac4f341a7",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "tier",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Removed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "`BAD_REQUEST` — already claimed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Edit a tier",
+                "operationId": "6dc9694ca25f03c20daa8398455d03f0",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "tier",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/events/{event}/tiers/{tier}/rewards": {
+            "post": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Add a reward line to a tier's bundle",
+                "description": "References a row in the reward catalog (`GET /admin/reward-catalog`) — `reward_value`/`duration_days` are this particular use's amount/length, which the same catalog entry (e.g. \"Coins\") can differ by every time it is used.",
+                "operationId": "3f1c2317a467da0872d93be821c81229",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "tier",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "reward_catalog_id"
+                                ],
+                                "properties": {
+                                    "reward_catalog_id": {
+                                        "type": "integer"
+                                    },
+                                    "reward_value": {
+                                        "description": "Amount, for a coins/diamonds catalog entry",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "duration_days": {
+                                        "description": "Length, for a vip/frame/chat_bubble/entry_effect/badge catalog entry",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "label": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "sort_order": {
+                                        "type": "integer"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Added",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/events/{event}/tiers/{tier}/rewards/{reward}": {
+            "delete": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Remove a reward line",
+                "operationId": "e0d58c8f89be11dea7a0759ad0d366b0",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "tier",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "reward",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Removed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/events/{event}/progress": {
+            "get": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Standings preview — this event's board or progress leaderboard",
+                "description": "A `weekly_star` event returns `board` (delegated to its RankingRule); a threshold event returns `progress`, the live per-user recharge totals for a `period` query param (defaults to the event's own period).",
+                "operationId": "749957643d07804b56622b0d553304da",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "period",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "daily",
+                                "weekly",
+                                "monthly"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/events/{event}/distribute-tiers": {
+            "post": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Distribute a weekly_star event's rank-band bundles",
+                "description": "The rank-band counterpart to `POST /admin/events/{event}/distribute` — a rank is not final\nuntil the period closes, so it is admin-distributed rather than user-claimed. Requires a\n`LeaderboardSnapshot` for the period already (`POST /admin/ranking-rules/{rule}/snapshot`).\nIdempotent: a unique index on (tier, user, period) means re-running pays nothing further.",
+                "operationId": "68bf8bab474e227ed98a49cdf8d2ad43",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "period_start": {
+                                        "description": "Defaults to the current period",
+                                        "type": "string",
+                                        "format": "date"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Distributed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "`NOT_FOUND` — no snapshot for that period yet",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/events/{event}/manual-fulfillments": {
+            "get": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Reward lines waiting on support to fulfil by hand",
+                "description": "A claim's reward line whose catalog entry has `handler_key: manual` grants nothing automatically — this lists every one still outstanding for this event.",
+                "operationId": "eee2e7bf635f0efdda0484e87a853965",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/events/{event}/manual-fulfillments/{claim}": {
+            "post": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Mark one manual reward line as fulfilled",
+                "operationId": "afd10709c62c6760ae7ac864411d3db8",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "claim",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "line_index"
+                                ],
+                                "properties": {
+                                    "line_index": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Marked fulfilled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/reward-catalog": {
+            "get": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "The reward catalog every event's tier bundles draw from",
+                "description": "Adding a genuinely new kind of reward is a row here, not a code change: `handler_key` is\none of the automated grant paths (`coins`, `diamonds`, `vip`, `frame`, `chat_bubble`,\n`entry_effect`, `badge`) — each of which needs `handler_ref_id` pointing at the specific\nVIP tier/store item/badge — or `manual` for anything with no handler yet, which still\nshows in the app and still gets claimed, but only records the claim for support to\nfulfil outside the system.",
+                "operationId": "7e051cc0f046156b307639c95ae2cf2a",
+                "parameters": [
+                    {
+                        "name": "include_inactive",
+                        "in": "query",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Add a reward to the catalog",
+                "operationId": "2d5a3e185d5ce0d2476412253a2fa65a",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name",
+                                    "handler_key"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "VIP Gold"
+                                    },
+                                    "icon_url": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "handler_key": {
+                                        "type": "string",
+                                        "enum": [
+                                            "coins",
+                                            "diamonds",
+                                            "vip",
+                                            "frame",
+                                            "chat_bubble",
+                                            "entry_effect",
+                                            "badge",
+                                            "manual"
+                                        ]
+                                    },
+                                    "handler_ref_id": {
+                                        "description": "Required for vip/frame/chat_bubble/entry_effect/badge",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "is_active": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Added",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — missing or unmatched handler_ref_id",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/reward-catalog/{rewardCatalogItem}": {
+            "delete": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Remove a catalog entry",
+                "description": "Deactivated instead of deleted once any tier bundle already references it.",
+                "operationId": "6b92f62f74453a3317e06f4e41e8fff9",
+                "parameters": [
+                    {
+                        "name": "rewardCatalogItem",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Removed or deactivated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Edit a catalog entry",
+                "operationId": "45573ffe8c28c954f95725c8560e7489",
+                "parameters": [
+                    {
+                        "name": "rewardCatalogItem",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/ranking-rules": {
             "get": {
                 "tags": [

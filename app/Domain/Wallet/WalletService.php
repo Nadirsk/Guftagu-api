@@ -127,6 +127,34 @@ class WalletService
     }
 
     /**
+     * A system-initiated debit — the counterpart to `creditSystem()`. Used for a user
+     * spending their own balance on something the system itself prices (e.g. sending a
+     * gift), where there is no admin actor and the "why" lives in the caller's own
+     * record rather than a note.
+     *
+     * @param  'coin'|'diamond'  $currency
+     *
+     * @throws WalletException
+     */
+    public function debitSystem(
+        User $user,
+        string $currency,
+        int $amount,
+        string $type,
+        ?string $idempotencyKey = null,
+    ): LedgerTransaction {
+        if ($amount <= 0) {
+            throw new WalletException('INVALID_AMOUNT', 'The amount must be a positive whole number.');
+        }
+
+        if (! in_array($currency, [Wallet::COIN, Wallet::DIAMOND], true)) {
+            throw new WalletException('INVALID_CURRENCY', 'Currency must be coin or diamond.', 422);
+        }
+
+        return $this->move($user, $currency, LedgerTransaction::DEBIT, $amount, $type, null, null, $idempotencyKey);
+    }
+
+    /**
      * The locking, balance-move and ledger-write shared by every credit/debit path (§15
      * rules 2, 4, 5, 7). Callers validate their own preconditions (amount, currency,
      * direction, note) before reaching here — this only ever moves money.

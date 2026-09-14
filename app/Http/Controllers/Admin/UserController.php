@@ -6,13 +6,16 @@ use App\Domain\Access\Exceptions\PermissionException;
 use App\Domain\Access\Services\PermissionResolver;
 use App\Domain\Audit\AuditLogger;
 use App\Domain\Media\ImageUploadService;
+use App\Domain\Store\InventoryService;
 use App\Domain\Users\SanctionService;
 use App\Domain\Wallet\WalletService;
 use App\Http\Controllers\Controller;
 use App\Models\LedgerTransaction;
 use App\Models\User;
+use App\Models\UserBadge;
 use App\Models\UserKyc;
 use App\Models\UserProfile;
+use App\Models\UserStoreItem;
 use App\Models\Wallet;
 use App\Models\WealthCharmLevel;
 use App\Support\ApiResponse;
@@ -40,6 +43,7 @@ class UserController extends Controller
         protected AuditLogger $audit,
         protected PermissionResolver $resolver,
         protected ImageUploadService $uploads,
+        protected InventoryService $inventory,
     ) {
     }
 
@@ -287,6 +291,29 @@ class UserController extends Controller
                 'wealth_level' => $this->levelPayload($wallet->wealthLevel(), $wallet->wealth_level_override_id !== null),
                 'charm_level'  => $this->levelPayload($wallet->charmLevel(), $wallet->charm_level_override_id !== null),
             ],
+            'inventory' => (function () use ($user) {
+                $vip = $this->inventory->activeVip($user);
+
+                return [
+                    'vip' => $vip === null ? null : [
+                        'level'      => $vip->vipTier->level,
+                        'name_en'    => $vip->vipTier->name_en,
+                        'expires_at' => $vip->expires_at->toIso8601ZuluString(),
+                        'source'     => $vip->source,
+                    ],
+                    'items' => $this->inventory->activeItems($user)->map(fn (UserStoreItem $owned) => [
+                        'type'       => $owned->storeItem->type,
+                        'name'       => $owned->storeItem->name,
+                        'expires_at' => $owned->expires_at?->toIso8601ZuluString(),
+                        'source'     => $owned->source,
+                    ]),
+                    'badges' => $this->inventory->activeBadges($user)->map(fn (UserBadge $owned) => [
+                        'name_en'    => $owned->badge->name_en,
+                        'expires_at' => $owned->expires_at?->toIso8601ZuluString(),
+                        'source'     => $owned->source,
+                    ]),
+                ];
+            })(),
             'kyc' => $user->kyc === null ? null : [
                 'id'               => $user->kyc->id,
                 'status'           => $user->kyc->status,

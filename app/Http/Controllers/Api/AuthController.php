@@ -5,9 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Domain\Onboarding\Services\OtpService;
 use App\Domain\Onboarding\Services\SocialTokenVerifier;
 use App\Domain\Onboarding\Services\UserAuthService;
+use App\Domain\Store\InventoryService;
 use App\Http\Controllers\Controller;
 use App\Models\OtpVerification;
 use App\Models\User;
+use App\Models\UserBadge;
+use App\Models\UserStoreItem;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,6 +32,7 @@ class AuthController extends Controller
         protected OtpService $otp,
         protected UserAuthService $auth,
         protected SocialTokenVerifier $socialVerifier,
+        protected InventoryService $inventory,
     ) {
     }
 
@@ -350,6 +354,7 @@ class AuthController extends Controller
     protected function userPayload(User $user): array
     {
         $profile = $user->profile;
+        $vip = $this->inventory->activeVip($user);
 
         return [
             'uuid'                => $user->uuid,
@@ -362,6 +367,25 @@ class AuthController extends Controller
             'agora_uid'           => $user->agora_uid,
             'status'              => $user->status,
             'is_profile_complete' => (bool) ($profile?->is_profile_complete ?? false),
+            // The entitlement layer: what VIP/cosmetics/badges this user actually holds
+            // right now, not just what was ever granted (see InventoryService).
+            'vip' => $vip === null ? null : [
+                'level'      => $vip->vipTier->level,
+                'name_en'    => $vip->vipTier->name_en,
+                'expires_at' => $vip->expires_at->toIso8601ZuluString(),
+            ],
+            'inventory' => $this->inventory->activeItems($user)->map(fn (UserStoreItem $owned) => [
+                'type'       => $owned->storeItem->type,
+                'name'       => $owned->storeItem->name,
+                'image_url'  => $owned->storeItem->image_url,
+                'expires_at' => $owned->expires_at?->toIso8601ZuluString(),
+            ])->all(),
+            'badges' => $this->inventory->activeBadges($user)->map(fn (UserBadge $owned) => [
+                'key'        => $owned->badge->key,
+                'name_en'    => $owned->badge->name_en,
+                'icon_url'   => $owned->badge->icon_url,
+                'expires_at' => $owned->expires_at?->toIso8601ZuluString(),
+            ])->all(),
         ];
     }
 }

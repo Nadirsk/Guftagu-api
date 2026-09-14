@@ -59,6 +59,7 @@ class LeaderboardService
                 'users.id AS entity_id',
                 'users.guftagu_id',
                 'user_profiles.display_name',
+                'user_profiles.avatar_url',
                 DB::raw("{$column} AS score"),
             ])
             ->values()
@@ -68,6 +69,7 @@ class LeaderboardService
                 'score'        => (int) $row->score,
                 'guftagu_id'   => $row->guftagu_id,
                 'display_name' => $row->display_name,
+                'avatar_url'   => $row->avatar_url,
             ]);
     }
 
