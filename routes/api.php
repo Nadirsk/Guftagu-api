@@ -39,12 +39,14 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BlockController;
 use App\Http\Controllers\Api\CheckinController;
 use App\Http\Controllers\Api\ConversationController;
+use App\Http\Controllers\Api\DevAuthController;
 use App\Http\Controllers\Api\EventController as AppEventController;
 use App\Http\Controllers\Api\FollowController;
 use App\Http\Controllers\Api\FriendController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\PostCommentController;
 use App\Http\Controllers\Api\PostController;
+use App\Http\Controllers\Api\RoomController as ApiRoomController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\VisitorController;
 use App\Models\User;
@@ -97,6 +99,13 @@ Route::prefix('v1')->name('app.auth.')->group(function () {
     Route::post('auth/social', [AuthController::class, 'socialLogin'])->middleware('throttle:auth-login')->name('social');
     Route::post('auth/password/forgot', [AuthController::class, 'forgotPassword'])->middleware('throttle:otp-send')->name('password.forgot');
     Route::post('auth/password/reset', [AuthController::class, 'resetPassword'])->middleware('throttle:otp-verify')->name('password.reset');
+
+    // Local-only test affordance — see App\Http\Controllers\Api\DevAuthController. Mirrors
+    // Admin\DevHelperController's pattern: registered inside the environment check rather
+    // than behind a permission, so outside local the route does not exist at all.
+    if (app()->environment('local')) {
+        Route::get('dev/login-as/{user}', [DevAuthController::class, 'loginAs'])->name('dev.login-as');
+    }
 });
 
 Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 'throttle:mobile-api'])->group(function () {
@@ -177,6 +186,19 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])
         ->middleware('throttle:dm-send')
         ->name('conversations.messages.store');
+
+    // ---- voice rooms: join, seats, self mic/camera (docs/03 §4). Audio/video is
+    // peer-to-peer WebRTC, signalled over the `room.{uuid}` presence channel
+    // (routes/channels.php) — nothing here mints an Agora token, there isn't one.
+    Route::prefix('rooms/{room:uuid}')->name('rooms.')->group(function () {
+        Route::get('state', [ApiRoomController::class, 'state'])->name('state');
+        Route::post('join', [ApiRoomController::class, 'join'])->name('join');
+        Route::post('leave', [ApiRoomController::class, 'leave'])->name('leave');
+        Route::post('seats/{seat}/take', [ApiRoomController::class, 'takeSeat'])->name('seats.take');
+        Route::post('seats/leave', [ApiRoomController::class, 'leaveSeat'])->name('seats.leave');
+        Route::patch('mic', [ApiRoomController::class, 'setMic'])->name('mic');
+        Route::patch('camera', [ApiRoomController::class, 'setCamera'])->name('camera');
+    });
 });
 
 Route::prefix('v1')->group(function () {

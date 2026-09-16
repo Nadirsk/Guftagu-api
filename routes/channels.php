@@ -6,6 +6,8 @@ use App\Models\AdminUser;
 use App\Models\Block;
 use App\Models\Conversation;
 use App\Models\Post;
+use App\Models\Room;
+use App\Models\RoomMember;
 use App\Models\User;
 use Illuminate\Support\Facades\Broadcast;
 
@@ -86,6 +88,45 @@ Broadcast::channel('conversation.{uuid}', function ($user, string $uuid) {
 
     return ! Block::existsBetween($user->id, $otherId)
         && app(SocialService::class)->areFriends($user->id, $otherId);
+});
+
+/**
+ * A room's live seat floor — `seat.occupied`, `seat.vacated`, `mic.toggled` (docs/03 §4)
+ * and the WebRTC signalling two seated clients exchange directly as `client-*` events on
+ * this same channel. Presence, not private: the app needs "who's actually here right now"
+ * for free, which is exactly what a presence channel already tracks.
+ *
+ * Gated the same way the REST join endpoint is — {@see Room::isBlockedForUser} plus an
+ * active `room_members` row. A banned or never-joined user cannot listen in over the
+ * socket just because they know the room's uuid.
+ */
+Broadcast::channel('room.{uuid}', function ($user, string $uuid) {
+    if (! $user instanceof User) {
+        return false;
+    }
+
+    $room = Room::where('uuid', $uuid)->first();
+
+    if ($room === null || $room->isBlockedForUser($user->id)) {
+        return false;
+    }
+
+    $isMember = RoomMember::query()
+        ->where('room_id', $room->id)
+        ->where('user_id', $user->id)
+        ->where('is_active', true)
+        ->exists();
+
+    if (! $isMember) {
+        return false;
+    }
+
+    return [
+        'id'     => $user->id,
+        'uuid'   => $user->uuid,
+        'name'   => $user->profile?->display_name,
+        'avatar' => $user->profile?->avatar_url,
+    ];
 });
 
 // ----------------------------------------------------------------------- admin
