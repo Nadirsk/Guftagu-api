@@ -146,6 +146,15 @@ class InventoryService
             ->values();
     }
 
+    /** A required tier is a floor, not an exact match — level 3 satisfies a level-2 gate. */
+    public function meetsTier(User $user, int $requiredTierId): bool
+    {
+        $required = VipTier::find($requiredTierId);
+        $active = $this->activeVip($user);
+
+        return $required !== null && $active !== null && $active->vipTier->level >= $required->level;
+    }
+
     /** @return Collection<int, UserBadge> */
     public function activeBadges(User $user): Collection
     {

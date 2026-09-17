@@ -44,18 +44,50 @@ class AgencyService
 
         $before = ['status' => $agency->status];
 
-        $agency->forceFill([
-            'status'           => Agency::APPROVED,
-            'approved_by'      => $actor->id,
-            'approved_at'      => now(),
-            'rejection_reason' => null,
-        ])->save();
+        DB::transaction(function () use ($agency, $actor) {
+            $agency->forceFill([
+                'status'           => Agency::APPROVED,
+                'approved_by'      => $actor->id,
+                'approved_at'      => now(),
+                'rejection_reason' => null,
+            ])->save();
+
+            // Whoever owns the agency runs it and hosts in it — they do not separately
+            // apply through host/apply and cannot approve themselves anyway.
+            if ($agency->owner_user_id !== null) {
+                $this->makeOwnerHost($agency, $actor);
+            }
+        });
 
         $this->audit->log($actor, 'agency.approve', 'agency', Agency::class, $agency->id, $before, [
             'status' => Agency::APPROVED,
         ]);
 
         return $agency->refresh();
+    }
+
+    /** The agency's owner becomes an approved host in their own agency, the moment it is approved. */
+    protected function makeOwnerHost(Agency $agency, AdminUser $actor): void
+    {
+        $host = Host::firstOrNew(['user_id' => $agency->owner_user_id]);
+
+        $host->fill([
+            'agency_id'   => $agency->id,
+            'status'      => Host::APPROVED,
+            'applied_at'  => $host->applied_at ?? now(),
+            'approved_by' => $actor->id,
+            'approved_at' => now(),
+        ])->save();
+
+        $alreadyMember = AgencyMember::query()
+            ->where('agency_id', $agency->id)
+            ->where('user_id', $agency->owner_user_id)
+            ->where('is_active', true)
+            ->exists();
+
+        if (! $alreadyMember) {
+            $this->joinAgency($host, $agency, 'owner');
+        }
     }
 
     /**
@@ -134,13 +166,30 @@ class AgencyService
     /**
      * Approve a host application, creating (or reactivating) the host record.
      *
+     * The actor is either the agency's owner (a regular user, reviewing their own
+     * agency's applications) or an admin. An admin may additionally **override** an
+     * owner's earlier rejection — an owner cannot undo their own or another owner's
+     * decision once made, so a mistaken rejection needs an admin to fix it.
+     *
      * @throws AgencyException
      */
-    public function approveApplication(HostApplication $application, ?Agency $agency, AdminUser $actor): Host
+    public function approveApplication(HostApplication $application, ?Agency $agency, AdminUser|User $actor): Host
     {
-        if (! $application->isPending()) {
-            throw new AgencyException('BAD_REQUEST', "That application is already {$application->status}.", 400);
+        $isAdmin = $actor instanceof AdminUser;
+
+        if ($application->status === HostApplication::APPROVED) {
+            throw new AgencyException('BAD_REQUEST', 'That application is already approved.', 400);
         }
+
+        if ($application->status === HostApplication::REJECTED && ! $isAdmin) {
+            throw new AgencyException(
+                'BAD_REQUEST',
+                'This application was already rejected. Only an admin can override that decision.',
+                400,
+            );
+        }
+
+        $wasRejected = $application->status === HostApplication::REJECTED;
 
         $agency ??= $application->agency;
 
@@ -152,7 +201,7 @@ class AgencyService
             );
         }
 
-        return DB::transaction(function () use ($application, $agency, $actor) {
+        return DB::transaction(function () use ($application, $agency, $actor, $isAdmin, $wasRejected) {
             // A person who left and came back is the same host row, reactivated — a second
             // row would split their earnings history in two.
             $host = Host::firstOrNew(['user_id' => $application->user_id]);
@@ -161,7 +210,7 @@ class AgencyService
                 'agency_id'   => $agency?->id,
                 'status'      => Host::APPROVED,
                 'applied_at'  => $host->applied_at ?? $application->created_at,
-                'approved_by' => $actor->id,
+                'approved_by' => $isAdmin ? $actor->id : null,
                 'approved_at' => now(),
             ])->save();
 
@@ -170,14 +219,19 @@ class AgencyService
             }
 
             $application->forceFill([
-                'status'      => HostApplication::APPROVED,
-                'agency_id'   => $agency?->id,
-                'reviewed_by' => $actor->id,
-                'reviewed_at' => now(),
+                'status'              => HostApplication::APPROVED,
+                'agency_id'           => $agency?->id,
+                'reviewed_by'         => $isAdmin ? $actor->id : null,
+                'reviewed_by_user_id' => $isAdmin ? null : $actor->id,
+                'reviewed_at'         => now(),
+                'reason'              => null,
             ])->save();
 
-            $this->audit->log($actor, 'host.approve', 'agency', Host::class, $host->id, null, [
-                'application_id' => $application->id, 'agency_id' => $agency?->id,
+            $this->audit->log($isAdmin ? $actor : null, 'host.approve', 'agency', Host::class, $host->id, null, [
+                'application_id'       => $application->id,
+                'agency_id'            => $agency?->id,
+                'reviewed_by_user_id'  => $isAdmin ? null : $actor->id,
+                'overrode_rejection'   => $wasRejected,
             ]);
 
             return $host;
@@ -187,7 +241,7 @@ class AgencyService
     /**
      * @throws AgencyException
      */
-    public function rejectApplication(HostApplication $application, string $reason, AdminUser $actor): HostApplication
+    public function rejectApplication(HostApplication $application, string $reason, AdminUser|User $actor): HostApplication
     {
         if (! $application->isPending()) {
             throw new AgencyException('BAD_REQUEST', "That application is already {$application->status}.", 400);
@@ -197,15 +251,19 @@ class AgencyService
             throw new AgencyException('VALIDATION_ERROR', 'A reason is required — the applicant is told it.', 422);
         }
 
+        $isAdmin = $actor instanceof AdminUser;
+
         $application->forceFill([
-            'status'      => HostApplication::REJECTED,
-            'reviewed_by' => $actor->id,
-            'reviewed_at' => now(),
-            'reason'      => trim($reason),
+            'status'              => HostApplication::REJECTED,
+            'reviewed_by'         => $isAdmin ? $actor->id : null,
+            'reviewed_by_user_id' => $isAdmin ? null : $actor->id,
+            'reviewed_at'         => now(),
+            'reason'              => trim($reason),
         ])->save();
 
-        $this->audit->log($actor, 'host.reject', 'agency', HostApplication::class, $application->id, null, [
-            'reason' => trim($reason),
+        $this->audit->log($isAdmin ? $actor : null, 'host.reject', 'agency', HostApplication::class, $application->id, null, [
+            'reason'              => trim($reason),
+            'reviewed_by_user_id' => $isAdmin ? null : $actor->id,
         ]);
 
         return $application->refresh();
@@ -279,12 +337,12 @@ class AgencyService
         return $host->refresh();
     }
 
-    protected function joinAgency(Host $host, Agency $agency): void
+    protected function joinAgency(Host $host, Agency $agency, string $role = 'host'): void
     {
         AgencyMember::create([
             'agency_id' => $agency->id,
             'user_id'   => $host->user_id,
-            'role'      => 'host',
+            'role'      => $role,
             'joined_at' => now(),
             'is_active' => true,
         ]);

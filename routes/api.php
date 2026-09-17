@@ -35,7 +35,9 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\UserWalletController;
 use App\Http\Controllers\Admin\VipTierController;
 use App\Http\Controllers\Admin\WithdrawalController;
+use App\Http\Controllers\Api\AgencyController as ApiAgencyController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BadgeController;
 use App\Http\Controllers\Api\BlockController;
 use App\Http\Controllers\Api\CheckinController;
 use App\Http\Controllers\Api\ConversationController;
@@ -43,12 +45,25 @@ use App\Http\Controllers\Api\DevAuthController;
 use App\Http\Controllers\Api\EventController as AppEventController;
 use App\Http\Controllers\Api\FollowController;
 use App\Http\Controllers\Api\FriendController;
+use App\Http\Controllers\Api\GiftController as ApiGiftController;
+use App\Http\Controllers\Api\HostController as ApiHostController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\PostCommentController;
 use App\Http\Controllers\Api\PostController;
+use App\Http\Controllers\Api\ProgressionController;
+use App\Http\Controllers\Api\RankingController as ApiRankingController;
+use App\Http\Controllers\Api\RechargeController;
+use App\Http\Controllers\Api\RoomCatalogueController as ApiRoomCatalogueController;
+use App\Http\Controllers\Api\RoomChatController;
 use App\Http\Controllers\Api\RoomController as ApiRoomController;
+use App\Http\Controllers\Api\RoomGiftController;
+use App\Http\Controllers\Api\RoomHostController;
 use App\Http\Controllers\Api\SearchController;
+use App\Http\Controllers\Api\StoreController as ApiStoreController;
+use App\Http\Controllers\Api\VipController;
 use App\Http\Controllers\Api\VisitorController;
+use App\Http\Controllers\Api\WalletController as ApiWalletController;
+use App\Http\Controllers\Api\WithdrawalController as ApiWithdrawalController;
 use App\Models\User;
 use Illuminate\Support\Facades\Route;
 
@@ -114,6 +129,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::post('auth/logout', [AuthController::class, 'logout'])->name('auth.logout');
     Route::get('auth/me', [AuthController::class, 'me'])->name('auth.me');
     Route::post('auth/profile/setup', [AuthController::class, 'setupProfile'])->name('auth.profile.setup');
+    Route::patch('profile', [AuthController::class, 'updateProfile'])->name('profile.update');
 
     // ---- daily check-in (D.7c)
     Route::get('checkin', [CheckinController::class, 'status'])->name('checkin.status');
@@ -187,6 +203,57 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         ->middleware('throttle:dm-send')
         ->name('conversations.messages.store');
 
+    // ---- gifts, wallet, recharge, withdrawals (D.6)
+    Route::get('gifts', [ApiGiftController::class, 'index'])->name('gifts.index');
+    Route::get('gifts/categories', [ApiGiftController::class, 'categories'])->name('gifts.categories');
+    Route::get('wallet', [ApiWalletController::class, 'show'])->name('wallet.show');
+    Route::get('wallet/coins/transactions', [ApiWalletController::class, 'coinTransactions'])->name('wallet.coins.transactions');
+    Route::get('wallet/diamonds/transactions', [ApiWalletController::class, 'diamondTransactions'])->name('wallet.diamonds.transactions');
+    Route::get('recharge-packages', [RechargeController::class, 'packages'])->name('recharge-packages.index');
+    Route::get('withdrawals/config', [ApiWithdrawalController::class, 'config'])->name('withdrawals.config');
+    Route::get('withdrawals', [ApiWithdrawalController::class, 'index'])->name('withdrawals.index');
+    Route::post('withdrawals', [ApiWithdrawalController::class, 'store'])->name('withdrawals.store');
+
+    // ---- VIP, progression, badges, store (D.7)
+    Route::get('vip/tiers', [VipController::class, 'tiers'])->name('vip.tiers');
+    Route::get('vip/me', [VipController::class, 'me'])->name('vip.me');
+    Route::post('vip/purchase', [VipController::class, 'purchase'])->name('vip.purchase');
+    Route::get('progression', [ProgressionController::class, 'show'])->name('progression.show');
+    Route::get('badges', [BadgeController::class, 'index'])->name('badges.index');
+    Route::get('store/items', [ApiStoreController::class, 'index'])->name('store.items.index');
+    Route::get('store/items/mine', [ApiStoreController::class, 'mine'])->name('store.items.mine');
+    Route::post('store/items/{item}/purchase', [ApiStoreController::class, 'purchase'])->name('store.items.purchase');
+
+    // ---- rankings (D.8)
+    Route::get('rankings', [ApiRankingController::class, 'board'])->name('rankings.board');
+    Route::get('rankings/me', [ApiRankingController::class, 'me'])->name('rankings.me');
+
+    // ---- agency & host application (D.9a/b)
+    Route::get('agencies', [ApiHostController::class, 'agencies'])->name('agencies.index');
+    Route::post('host/apply', [ApiHostController::class, 'apply'])->name('host.apply');
+    Route::get('host/status', [ApiHostController::class, 'status'])->name('host.status');
+    Route::get('host/earnings', [ApiHostController::class, 'earnings'])->name('host.earnings');
+    Route::get('host/targets', [ApiHostController::class, 'targets'])->name('host.targets');
+
+    // ---- a user creating and owning their own agency (D.9a)
+    Route::post('agency/apply', [ApiAgencyController::class, 'apply'])->name('agency.apply');
+    Route::get('agency/status', [ApiAgencyController::class, 'status'])->name('agency.status');
+
+    // ---- agency owner reviewing applications to their own agency (D.9a)
+    Route::get('agency/host-applications', [ApiAgencyController::class, 'applications'])->name('agency.host-applications.index');
+    Route::post('agency/host-applications/{application}/approve', [ApiAgencyController::class, 'approveApplication'])
+        ->name('agency.host-applications.approve');
+    Route::post('agency/host-applications/{application}/reject', [ApiAgencyController::class, 'rejectApplication'])
+        ->name('agency.host-applications.reject');
+
+    // ---- room catalogue: read-only reference data for the create-room screen (D.2a)
+    Route::get('room-categories', [ApiRoomCatalogueController::class, 'categories'])->name('room-categories.index');
+    Route::get('room-themes', [ApiRoomCatalogueController::class, 'themes'])->name('room-themes.index');
+    Route::get('room-seat-templates', [ApiRoomCatalogueController::class, 'seatTemplates'])->name('room-seat-templates.index');
+
+    // ---- create a room (D.2a). Not nested under {room:uuid} — there isn't one yet.
+    Route::post('rooms', [RoomHostController::class, 'store'])->name('rooms.store');
+
     // ---- voice rooms: join, seats, self mic/camera (docs/03 §4). Audio/video is
     // peer-to-peer WebRTC, signalled over the `room.{uuid}` presence channel
     // (routes/channels.php) — nothing here mints an Agora token, there isn't one.
@@ -198,6 +265,24 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         Route::post('seats/leave', [ApiRoomController::class, 'leaveSeat'])->name('seats.leave');
         Route::patch('mic', [ApiRoomController::class, 'setMic'])->name('mic');
         Route::patch('camera', [ApiRoomController::class, 'setCamera'])->name('camera');
+        Route::post('raise-hand', [ApiRoomController::class, 'raiseHand'])->name('raise-hand');
+
+        // ---- host / co-host controls on somebody else's seat (D.2b)
+        Route::post('members/{profile}/co-host', [RoomHostController::class, 'promoteCoHost'])->name('members.co-host.grant');
+        Route::delete('members/{profile}/co-host', [RoomHostController::class, 'revokeCoHost'])->name('members.co-host.revoke');
+        Route::post('seats/{seat}/invite', [RoomHostController::class, 'inviteToSeat'])->name('seats.invite');
+        Route::post('seats/{seat}/mute', [RoomHostController::class, 'muteSeat'])->name('seats.mute');
+        Route::post('seats/{seat}/remove', [RoomHostController::class, 'removeFromSeat'])->name('seats.remove');
+        Route::patch('seats/{seat}/lock', [RoomHostController::class, 'lockSeat'])->name('seats.lock');
+        Route::patch('announcement', [RoomHostController::class, 'setAnnouncement'])->name('announcement');
+
+        // ---- in-room chat (D.2d)
+        Route::get('messages', [RoomChatController::class, 'index'])->name('messages.index');
+        Route::post('messages', [RoomChatController::class, 'store'])->name('messages.store');
+
+        // ---- gifting within this room (D.6a)
+        Route::get('gifts', [RoomGiftController::class, 'index'])->name('gifts.index');
+        Route::post('gifts', [RoomGiftController::class, 'store'])->name('gifts.store');
     });
 });
 

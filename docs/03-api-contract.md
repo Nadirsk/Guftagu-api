@@ -191,6 +191,25 @@ may use numeric ids. Never leak a sequential id to the app.
 | POST | `/rooms/{uuid}/ban/{userUuid}` | Room-level ban by host |
 | GET | `/rooms/{uuid}/gifts` | Recent gift feed for this room |
 
+**Implementation status (2026-09-17):** this table is the original design spec, written
+before any of D.2 existed in code. What actually shipped, and where it deliberately took a
+narrower shape than the spec above:
+
+| Spec row | Shipped as | Note |
+|---|---|---|
+| `POST /rooms` | same | `cover_url` not `cover`; no `seat_layout` param yet |
+| `seats/{n}/kick` | `seats/{n}/remove` | Renamed on purpose — "kick" is the moderator's room-ban action (`Admin\RoomController::kickMember`, a `UserSanction`); this only frees the seat |
+| `handraise` (request/withdraw/queue/accept/reject) | `POST raise-hand` (self-toggle) | The host sees the queue via `state.raised_hands`; there is no separate accept/reject step — the host calls `seats/{n}/invite` directly, which does the same job |
+| `cohost/{userUuid}` (single toggle) | `POST`/`DELETE members/{profile}/co-host` | Same effect, two verbs instead of one |
+| `POST /rooms/{uuid}/announcement` | `PATCH` | — |
+| `invite-link` | not built | `state.room.room_code` is returned and can be shared as-is; no separate short-link endpoint |
+| `PATCH /rooms/{uuid}` (owner edits name/cover/theme) | not built | only `announcement` is editable after creation |
+| `GET /rooms/{uuid}/members` | not built | membership is visible via `state.seats` + `state.raised_hands`, not as its own paginated list |
+| `messages/{id}/pin`, `DELETE messages/{id}` | not built | |
+| `ban/{userUuid}` (room-level ban by host) | not built | a host cannot ban from their own room; only staff can, via the existing moderator/admin kick |
+| `rtc-token`, `rtc` block in state | not built | there is no Agora integration — see the note on peer-to-peer WebRTC below `Api\RoomController::snapshot()` and the audit at `GUFTAGU_SCOPE_AUDIT_FR_D_USER_PLAYER.md` |
+| `GET /rooms`, `/rooms/trending`, `/rooms/categories` | not built | browsing/exploring rooms from the app is not implemented yet — only creating and joining one you already have the uuid/code for |
+
 **`GET /rooms/{uuid}/state` → 200** — the single most-called endpoint in the app.
 
 ```json
@@ -285,6 +304,15 @@ Failure modes: `INSUFFICIENT_BALANCE` (402) · `GIFT_UNAVAILABLE` (409) · `VIP_
 `USER_SANCTIONED` (403) · `WALLET_FROZEN` (403). A repeated `X-Idempotency-Key` returns the original
 `200` — it does not send a second gift.
 
+**Implementation status (2026-09-17):** built — `GET /gifts`, `GET /gifts/categories`,
+`POST`/`GET /rooms/{uuid}/gifts` (idempotency key, VIP gate, stock, `combo_count`, `gift.sent`
+broadcast), `GET /wallet`, `GET /wallet/coins|diamonds/transactions`, `GET /withdrawals/config`,
+`POST`/`GET /withdrawals`, `GET /recharge-packages`. **Not built:** `POST /calls/{uuid}/gifts` (D.5
+does not exist), `POST /recharge/orders` + verify/status (needs a live Razorpay account, CI-04 —
+building a stub order id would look finished and would not be), `GET /invoices` (nothing to invoice
+without real recharges yet). `USER_SANCTIONED`/`WALLET_FROZEN` are not yet enforced in
+`GiftSendService::send()`.
+
 ---
 
 ## 7. Mobile — VIP, progression, rankings, events
@@ -312,6 +340,17 @@ Failure modes: `INSUFFICIENT_BALANCE` (402) · `GIFT_UNAVAILABLE` (409) · `VIP_
 | GET | `/events/{uuid}/leaderboard` | |
 | POST | `/events/{uuid}/claim/{rewardId}` | |
 | GET | `/lucky-draws/{uuid}` | Prize pool, `seed_hash`, result once drawn |
+
+**Implementation status (2026-09-17):** built — `GET /vip/tiers`, `GET /vip/me`,
+`POST /vip/purchase` (coins only; `pay_with: gateway` needs the same Razorpay account §6's recharge
+does), `GET /progression`, `GET /badges`, `GET /store/items`, `GET /store/items/mine`,
+`POST /store/items/{id}/purchase` (the spec's `/frames` is generalized here to any `StoreItem` type
+— frame, bubble, entry banner, entrance effect — rather than one endpoint per type),
+`GET /rankings`, `GET /rankings/me` (`wealth`/`charm` boards only, same restriction the admin panel
+already has). **Not built:** `POST /vip/auto-renew`, equipping an owned frame/bubble/effect (no
+"currently equipped" column exists yet), an achievements auto-tracking engine (deliberately
+deferred — see the FR.D audit), `/lucky-draws/{uuid}` as a standalone endpoint (lucky draws are
+folded into the existing `/events` claim flow instead).
 
 ---
 
@@ -366,6 +405,12 @@ Failure modes: `INSUFFICIENT_BALANCE` (402) · `GIFT_UNAVAILABLE` (409) · `VIP_
 | POST | `/reports` | `{target_type, target_id, category, description, evidence[]}` (D.9c) |
 | GET | `/support/faqs` | D.9d |
 | POST | `/support/tickets` · GET `/support/tickets` · POST `/support/tickets/{uuid}/messages` | |
+
+**Implementation status (2026-09-17), D.9 only** (D.3/D.4 were already built and are unchanged
+here): `GET /agencies`, `POST /host/apply`, `GET /host/status`, `GET /host/earnings`,
+`GET /host/targets` built — refuses a second application while one is pending, refuses applying
+while already an approved host. **Not built:** `POST /reports`, `/support/*` (D.9c's reporting and
+D.9d's support centre) — this pass covered D.9a/b only, per the priority order this was done in.
 
 ---
 

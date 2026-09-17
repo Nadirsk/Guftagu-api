@@ -292,6 +292,35 @@ class AuthController extends Controller
         ], 'Profile saved');
     }
 
+    /**
+     * PATCH /profile — D.1c/d, the settings screen. Separate from `setupProfile`, which is
+     * the one-time onboarding step (name/gender/DOB cannot be changed here); this is
+     * everything a user revisits afterwards: bio, avatar, language, theme and the privacy/
+     * notification toggles, which had no route at all before this despite the columns
+     * (`language`, `theme`, `privacy`, `notification_prefs`) already existing on
+     * `user_profiles`.
+     */
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $data = $request->validate([
+            'display_name'        => ['sometimes', 'string', 'max:50'],
+            'bio'                 => ['sometimes', 'nullable', 'string', 'max:300'],
+            'avatar_url'          => ['sometimes', 'nullable', 'url', 'max:500'],
+            'cover_url'           => ['sometimes', 'nullable', 'url', 'max:500'],
+            'city'                => ['sometimes', 'nullable', 'string', 'max:80'],
+            'language'            => ['sometimes', 'nullable', 'string', 'max:10'],
+            'theme'               => ['sometimes', 'nullable', Rule::in(['light', 'dark'])],
+            'privacy'             => ['sometimes', 'nullable', 'array'],
+            'notification_prefs'  => ['sometimes', 'nullable', 'array'],
+        ]);
+
+        $user->profile()->updateOrCreate([], $data);
+
+        return ApiResponse::success(['user' => $this->userPayload($user->fresh())], 'Profile updated');
+    }
+
     // ------------------------------------------------------------------ internals
 
     /**
@@ -361,9 +390,16 @@ class AuthController extends Controller
             'guftagu_id'          => $user->guftagu_id,
             'display_name'        => $profile?->display_name,
             'avatar_url'          => $profile?->avatar_url,
+            'cover_url'           => $profile?->cover_url,
+            'bio'                 => $profile?->bio,
             'gender'              => $profile?->gender,
             'date_of_birth'       => $profile?->date_of_birth?->toDateString(),
             'country'             => $profile?->country,
+            'city'                => $profile?->city,
+            'language'            => $profile?->language,
+            'theme'               => $profile?->theme,
+            'privacy'             => $profile?->privacy ?? [],
+            'notification_prefs'  => $profile?->notification_prefs ?? [],
             'agora_uid'           => $user->agora_uid,
             'status'              => $user->status,
             'is_profile_complete' => (bool) ($profile?->is_profile_complete ?? false),

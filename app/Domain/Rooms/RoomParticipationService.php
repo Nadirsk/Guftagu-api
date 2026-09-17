@@ -3,6 +3,7 @@
 namespace App\Domain\Rooms;
 
 use App\Events\Rooms\CameraToggled;
+use App\Events\Rooms\HandRaiseToggled;
 use App\Events\Rooms\MicToggled;
 use App\Events\Rooms\SeatOccupied;
 use App\Events\Rooms\SeatVacated;
@@ -11,6 +12,7 @@ use App\Models\RoomMember;
 use App\Models\RoomSeat;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 
 /**
  * The user's own half of a room: joining, taking a seat, leaving one, self-muting.
@@ -23,7 +25,7 @@ use Illuminate\Support\Facades\DB;
 class RoomParticipationService
 {
     /** @throws RoomException */
-    public function join(Room $room, User $user): RoomMember
+    public function join(Room $room, User $user, ?string $password = null): RoomMember
     {
         if ($room->isClosed()) {
             throw new RoomException('ROOM_CLOSED', 'This room has ended.', 410);
@@ -31,6 +33,22 @@ class RoomParticipationService
 
         if ($room->isBlockedForUser($user->id)) {
             throw new RoomException('FORBIDDEN', 'You cannot rejoin this room right now.', 403);
+        }
+
+        // D.2a — "private (password-protected) rooms". The owner and an already-active
+        // member never need to re-supply it: re-prompting a host for their own room's
+        // password on every reconnect would be a bug, not a feature.
+        if (
+            $room->visibility === 'private'
+            && $room->owner_id !== $user->id
+            && ! $this->activeMember($room, $user)
+            && (
+                $room->password_hash === null
+                || $password === null
+                || ! Hash::check($password, $room->password_hash)
+            )
+        ) {
+            throw new RoomException('FORBIDDEN', 'That password is not correct.', 403);
         }
 
         return DB::transaction(function () use ($room, $user) {
@@ -162,6 +180,38 @@ class RoomParticipationService
         CameraToggled::dispatch($room, $seat, $user);
 
         return $seat;
+    }
+
+    /**
+     * D.2c — raise-hand / request-to-speak. Toggled from whatever it currently is, so the
+     * client does not need to track state to ask for the opposite of it.
+     *
+     * @throws RoomException
+     */
+    public function toggleRaiseHand(Room $room, User $user): RoomMember
+    {
+        $member = $this->activeMember($room, $user);
+
+        if ($member === null) {
+            throw new RoomException('NOT_A_MEMBER', 'You are not in this room.', 409);
+        }
+
+        $raised = $member->hand_raised_at === null;
+
+        $member->forceFill(['hand_raised_at' => $raised ? now() : null])->save();
+
+        HandRaiseToggled::dispatch($room, $user, $raised);
+
+        return $member;
+    }
+
+    protected function activeMember(Room $room, User $user): ?RoomMember
+    {
+        return RoomMember::query()
+            ->where('room_id', $room->id)
+            ->where('user_id', $user->id)
+            ->where('is_active', true)
+            ->first();
     }
 
     /**

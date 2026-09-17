@@ -14,7 +14,10 @@ class GiftTransaction extends Model
 {
     public const UPDATED_AT = null;
 
-    protected $fillable = ['sender_id', 'receiver_id', 'gift_id', 'gift_category_id', 'quantity', 'coin_value'];
+    protected $fillable = [
+        'sender_id', 'receiver_id', 'room_id', 'gift_id', 'gift_category_id',
+        'quantity', 'coin_value', 'idempotency_key',
+    ];
 
     protected function casts(): array
     {
@@ -43,5 +46,10 @@ class GiftTransaction extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(GiftCategory::class, 'gift_category_id');
+    }
+
+    public function room(): BelongsTo
+    {
+        return $this->belongsTo(Room::class);
     }
 }

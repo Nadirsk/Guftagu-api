@@ -34,10 +34,12 @@ class RoomController extends Controller
         return ApiResponse::success($this->snapshot($room, $request->user()));
     }
 
-    /** POST /rooms/{room}/join — `{password?}`. Password-protected rooms are out of scope here. */
+    /** POST /rooms/{room}/join — `{password?}` for a private room. */
     public function join(Request $request, Room $room): JsonResponse
     {
-        $this->participation->join($room, $request->user());
+        $data = $request->validate(['password' => ['sometimes', 'nullable', 'string', 'max:100']]);
+
+        $this->participation->join($room, $request->user(), $data['password'] ?? null);
 
         return ApiResponse::success($this->snapshot($room, $request->user()), 'Joined');
     }
@@ -86,6 +88,17 @@ class RoomController extends Controller
         return ApiResponse::success($this->snapshot($room, $request->user()), $data['camera_on'] ? 'Camera on' : 'Camera off');
     }
 
+    /** POST /rooms/{room}/raise-hand — D.2c, toggled. */
+    public function raiseHand(Request $request, Room $room): JsonResponse
+    {
+        $member = $this->participation->toggleRaiseHand($room, $request->user());
+
+        return ApiResponse::success(
+            $this->snapshot($room, $request->user()),
+            $member->hand_raised_at !== null ? 'Hand raised' : 'Hand lowered',
+        );
+    }
+
     // ----------------------------------------------------------------- internals
 
     protected function snapshot(Room $room, User $viewer): array
@@ -105,8 +118,10 @@ class RoomController extends Controller
         return [
             'room' => [
                 'uuid'            => $room->uuid,
+                'room_code'       => $room->room_code,
                 'name'            => $room->name,
                 'status'          => $room->status,
+                'visibility'      => $room->visibility,
                 'listener_count'  => $room->activeMembers()->count(),
                 'video_enabled'   => $room->video_enabled,
                 'announcement'    => $room->announcement,
@@ -121,8 +136,18 @@ class RoomController extends Controller
                 'muted'       => $seat->isEffectivelyMuted(),
                 'user'        => $seat->user === null ? null : SocialPresenter::user($seat->user),
             ]),
+            // Who else is asking to speak right now — the host's queue, oldest request first.
+            'raised_hands' => $room->activeMembers()
+                ->whereNotNull('hand_raised_at')
+                ->with('user.profile:id,user_id,display_name,avatar_url')
+                ->orderBy('hand_raised_at')
+                ->get()
+                ->map(fn (RoomMember $m) => SocialPresenter::user($m->user))
+                ->all(),
             'my' => [
                 'role'          => $myMember?->role,
+                'is_host'       => $room->owner_id === $viewer->id || $myMember?->role === RoomMember::CO_HOST,
+                'hand_raised'   => $myMember?->hand_raised_at !== null,
                 'seat_number'   => $mySeat?->seat_number,
                 'muted'         => $mySeat?->is_self_muted ?? false,
                 'camera_on'     => $mySeat?->is_camera_on ?? false,

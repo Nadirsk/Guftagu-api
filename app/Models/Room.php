@@ -97,6 +97,11 @@ class Room extends Model
         return $this->hasMany(RoomMember::class);
     }
 
+    public function messages(): HasMany
+    {
+        return $this->hasMany(RoomMessage::class);
+    }
+
     public function activeMembers(): HasMany
     {
         return $this->hasMany(RoomMember::class)->where('is_active', true);

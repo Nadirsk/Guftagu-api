@@ -11,6 +11,7 @@ use App\Domain\Moderation\ModerationException;
 use App\Domain\Reports\ReportException;
 use App\Domain\Rooms\RoomException;
 use App\Domain\Social\SocialException;
+use App\Domain\Store\GiftException;
 use App\Domain\Store\LevelException;
 use App\Domain\Support\SupportException;
 use App\Domain\Users\SanctionException;
@@ -124,6 +125,10 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (LevelException $e, Request $request) {
+            return $request->expectsJson() || $request->is('api/*') ? $e->render() : null;
+        });
+
+        $exceptions->render(function (GiftException $e, Request $request) {
             return $request->expectsJson() || $request->is('api/*') ? $e->render() : null;
         });
 

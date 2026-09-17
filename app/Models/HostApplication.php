@@ -15,7 +15,7 @@ class HostApplication extends Model
 
     protected $fillable = [
         'user_id', 'agency_id', 'intro_audio_url', 'experience',
-        'status', 'reviewed_by', 'reviewed_at', 'reason',
+        'status', 'reviewed_by', 'reviewed_by_user_id', 'reviewed_at', 'reason',
     ];
 
     protected function casts(): array
@@ -36,6 +36,12 @@ class HostApplication extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'reviewed_by');
+    }
+
+    /** The agency owner who reviewed this, when it was decided by the owner rather than an admin. */
+    public function reviewerUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by_user_id');
     }
 
     public function scopePending(Builder $query): Builder

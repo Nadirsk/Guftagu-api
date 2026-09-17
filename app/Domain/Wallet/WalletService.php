@@ -205,10 +205,26 @@ class WalletService
 
             $balanceColumn = $currency === Wallet::DIAMOND ? 'diamond_balance' : 'coin_balance';
 
-            $wallet->forceFill([
+            $updates = [
                 $balanceColumn => $after,
                 'version'      => $wallet->version + 1,
-            ])->save();
+            ];
+
+            // docs/02 §7: "Wealth points = lifetime coins spent. Charm points = lifetime
+            // diamonds earned." — these lifetime counters are what rankings (D.8) and
+            // progression (D.7b) are read from; nothing wrote to them before this, so
+            // both always reported zero regardless of how much anyone actually moved.
+            if ($currency === Wallet::COIN && $direction === LedgerTransaction::DEBIT) {
+                $updates['lifetime_coins_spent'] = $wallet->lifetime_coins_spent + $amount;
+            } elseif ($currency === Wallet::DIAMOND && $direction === LedgerTransaction::CREDIT) {
+                $updates['lifetime_diamonds_earned'] = $wallet->lifetime_diamonds_earned + $amount;
+            }
+
+            if ($currency === Wallet::COIN && $direction === LedgerTransaction::CREDIT && $type === 'recharge') {
+                $updates['lifetime_coins_purchased'] = $wallet->lifetime_coins_purchased + $amount;
+            }
+
+            $wallet->forceFill($updates)->save();
 
             // §15 rule 2 — same transaction, always.
             return $this->modelFor($currency)::create([
