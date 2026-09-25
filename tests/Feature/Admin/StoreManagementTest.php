@@ -8,6 +8,7 @@ use App\Models\AuditLog;
 use App\Models\Gift;
 use App\Models\GiftCategory;
 use App\Models\Role;
+use App\Models\StoreItem;
 use App\Models\VipTier;
 use Database\Seeders\GiftCatalogueSeeder;
 use Database\Seeders\PermissionSeeder;
@@ -549,5 +550,66 @@ class StoreManagementTest extends TestCase
         $this->actingAs($admin->fresh(), 'sanctum-admin')
             ->postJson($this->base."/gifts/{$gift->id}/restock", ['stock' => 999])
             ->assertStatus(403);
+    }
+
+    #[Test]
+    public function a_store_item_svga_upload_keeps_its_extension_and_saves_onto_the_item(): void
+    {
+        Storage::fake('public');
+
+        $effect = StoreItem::create(['type' => 'entrance_effect', 'name' => 'Dragon', 'coin_price' => 0]);
+
+        // SVGA is a zip container — its content sniffs as zip/octet-stream, so the stored
+        // name must come from the upload, not from a guess, or the app's player rejects it.
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/store-items/animation', [
+                'file' => UploadedFile::fake()->create('dragon.svga', 800, 'application/zip'),
+                'id'   => $effect->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.type', 'svga');
+
+        $this->assertMatchesRegularExpression(
+            '#^guftagu/storeItem/'.$effect->id.'/animation_\d+\.svga$#',
+            $response->json('data.path'),
+        );
+        Storage::disk('public')->assertExists($response->json('data.path'));
+
+        $effect->refresh();
+        $this->assertSame($response->json('data.url'), $effect->animation_url);
+        $this->assertSame('svga', $effect->animation_type);
+    }
+
+    #[Test]
+    public function a_store_item_animation_without_an_id_only_returns_the_url(): void
+    {
+        Storage::fake('public');
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/store-items/animation', [
+                'file' => UploadedFile::fake()->create('ring.svga', 200),
+            ])
+            ->assertOk()
+            ->assertJsonStructure(['data' => ['url', 'path', 'size', 'type']]);
+    }
+
+    #[Test]
+    public function a_store_item_animation_rejects_other_file_types_and_oversized_files(): void
+    {
+        Storage::fake('public');
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/store-items/animation', [
+                'file' => UploadedFile::fake()->create('frame.exe', 10),
+            ])
+            ->assertStatus(422);
+
+        $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
+            ->postJson($this->base.'/store-items/animation', [
+                'file' => UploadedFile::fake()->create('huge.svga', 20 * 1024),
+            ])
+            ->assertStatus(422);
+
+        $this->assertStringContainsString('larger than', $response->json('error.details.file.0'));
     }
 }

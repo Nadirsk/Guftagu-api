@@ -192,6 +192,11 @@ class User extends Authenticatable
         return $this->hasMany(SearchHistory::class)->latest('searched_at');
     }
 
+    public function feedback(): HasMany
+    {
+        return $this->hasMany(Feedback::class);
+    }
+
     public function isFollowing(int $userId): bool
     {
         return $this->following()->whereKey($userId)->exists();

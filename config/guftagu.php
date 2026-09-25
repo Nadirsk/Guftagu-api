@@ -39,9 +39,10 @@ return [
         'ttl_minutes' => 5,
         'max_attempts' => 5,
 
-        // docs/03 §16 — "OTP send 3/hour/phone · 10/day/IP".
-        'send_per_hour' => 3,
-        'send_per_day_ip' => 10,
+        // docs/03 §16 — "OTP send 3/hour/phone · 10/day/IP". Env-overridable so a
+        // dev machine can resend freely without the shipped defaults moving.
+        'send_per_hour' => (int) env('USER_OTP_SEND_PER_HOUR', 3),
+        'send_per_day_ip' => (int) env('USER_OTP_SEND_PER_DAY_IP', 10),
 
     ],
 

@@ -43,11 +43,14 @@ use App\Http\Controllers\Api\CheckinController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\DevAuthController;
 use App\Http\Controllers\Api\EventController as AppEventController;
+use App\Http\Controllers\Api\FeedbackController;
 use App\Http\Controllers\Api\FollowController;
 use App\Http\Controllers\Api\FriendController;
 use App\Http\Controllers\Api\GiftController as ApiGiftController;
 use App\Http\Controllers\Api\HostController as ApiHostController;
 use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\MediaController;
+use App\Http\Controllers\Api\NotificationController as ApiNotificationController;
 use App\Http\Controllers\Api\PostCommentController;
 use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\ProgressionController;
@@ -153,16 +156,25 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::delete('search/history/{uuid}', [SearchController::class, 'destroyHistory'])->name('search.history.destroy');
 
     // ---- moments (D.3d)
+    // `media_urls` on a post stores URLs; this is where a picked file becomes one.
+    Route::post('media', [MediaController::class, 'store'])->name('media.store');
     Route::get('feed', [PostController::class, 'feed'])->name('feed');
     Route::post('posts', [PostController::class, 'store'])->name('posts.store');
     Route::get('posts/{post}', [PostController::class, 'show'])->name('posts.show');
     Route::delete('posts/{post}', [PostController::class, 'destroy'])->name('posts.destroy');
     Route::post('posts/{post}/like', [PostController::class, 'like'])->name('posts.like');
     Route::delete('posts/{post}/like', [PostController::class, 'unlike'])->name('posts.unlike');
+    Route::get('posts/{post}/likes', [PostController::class, 'likes'])->name('posts.likes');
     Route::get('posts/{post}/comments', [PostCommentController::class, 'index'])->name('posts.comments.index');
     Route::post('posts/{post}/comments', [PostCommentController::class, 'store'])->name('posts.comments.store');
     Route::delete('posts/{post}/comments/{comment}', [PostCommentController::class, 'destroy'])
         ->name('posts.comments.destroy');
+
+    // ---- notifications (D.3d, D.4)
+    Route::get('notifications', [ApiNotificationController::class, 'index'])->name('notifications.index');
+    Route::get('notifications/unread-count', [ApiNotificationController::class, 'unreadCount'])->name('notifications.unread_count');
+    Route::post('notifications/read-all', [ApiNotificationController::class, 'markAllRead'])->name('notifications.read_all');
+    Route::post('notifications/{notification}/read', [ApiNotificationController::class, 'markRead'])->name('notifications.read');
 
     // ---- follow graph, friends, blocks, visitors (D.3b, D.9c)
     // A friend is a mutual follow, so there is no request/accept flow to route: adding a
@@ -284,6 +296,9 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         Route::get('gifts', [RoomGiftController::class, 'index'])->name('gifts.index');
         Route::post('gifts', [RoomGiftController::class, 'store'])->name('gifts.store');
     });
+
+    // ---- feedback (Me screen)
+    Route::post('feedback', [FeedbackController::class, 'store'])->name('feedback.store');
 });
 
 Route::prefix('v1')->group(function () {
@@ -524,6 +539,7 @@ Route::prefix('v1')->group(function () {
                 Route::patch('store-items/{storeItem}', [StoreItemController::class, 'update'])->name('store-items.update');
                 Route::delete('store-items/{storeItem}', [StoreItemController::class, 'destroy'])->name('store-items.destroy');
                 Route::post('store-items/image', [StoreItemController::class, 'uploadImage'])->name('store-items.image');
+                Route::post('store-items/animation', [StoreItemController::class, 'uploadAnimation'])->name('store-items.animation');
             });
 
             // ---- economy (epic A.7)

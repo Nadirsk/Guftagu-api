@@ -37,6 +37,9 @@ class SocialPresenter
             'guftagu_id'   => $user->guftagu_id,
             'display_name' => $profile?->display_name,
             'avatar_url'   => $profile?->avatar_url,
+            // The moments feed prints "04:23:22 - India" under each post
+            // (Figma 25:451), so the author's country travels with them.
+            'country'      => $profile?->country,
         ];
     }
 

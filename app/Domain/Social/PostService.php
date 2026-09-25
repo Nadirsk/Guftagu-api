@@ -134,7 +134,7 @@ class PostService
         $post->refresh();
 
         if ($created) {
-            if ($post->user_id !== $actor->id) {
+            if ($post->author) {
                 $this->notify($post->author, 'post.liked', 'New like',
                     $this->displayName($actor).' liked your moment.', ['post_uuid' => $post->uuid]);
             }
@@ -223,9 +223,14 @@ class PostService
         $post->refresh();
         $comment->setRelation('author', $actor);
 
-        if ($post->user_id !== $actor->id) {
+        if ($post->author) {
             $this->notify($post->author, 'post.commented', 'New comment',
                 $this->displayName($actor).' commented on your moment.', ['post_uuid' => $post->uuid]);
+        }
+
+        if ($parent !== null && $parent->author && $parent->user_id !== $post->user_id) {
+            $this->notify($parent->author, 'post.commented', 'New reply',
+                $this->displayName($actor).' replied to your comment.', ['post_uuid' => $post->uuid]);
         }
 
         PostCommented::dispatch($post, $comment);
@@ -285,6 +290,19 @@ class PostService
         $query = Post::query()
             ->with(['author.profile:id,user_id,display_name,avatar_url'])
             ->visibleTo($viewer);
+
+        // The Moment tab is "people I have not followed yet", so it is not the
+        // same query as `public` with a different sort — the follows the
+        // Following tab selects on are exactly what this one excludes. Own
+        // posts go too: they already appear under Following.
+        if ($scope === 'discover' && $viewer !== null) {
+            $query->where('posts.user_id', '!=', $viewer->id)
+                ->whereNotExists(fn ($sub) => $sub
+                    ->selectRaw('1')
+                    ->from('follows')
+                    ->whereColumn('follows.following_id', 'posts.user_id')
+                    ->where('follows.follower_id', $viewer->id));
+        }
 
         if ($scope === 'following' && $viewer !== null) {
             $query->where(fn ($q) => $q
@@ -353,11 +371,54 @@ class PostService
         }
 
         if ($afterId !== null) {
-            $query->where('post_comments.id', '>', $afterId);
+            $query->where('post_comments.id', '<', $afterId);
         }
 
-        // Ascending: a comment thread reads top to bottom, unlike a feed.
-        $rows = $query->orderBy('post_comments.id')->limit($limit + 1)->get();
+        // Descending: latest comments first (newest at the top)
+        $rows = $query->latest('post_comments.id')->limit($limit + 1)->get();
+
+        $hasMore = $rows->count() > $limit;
+        $items = $hasMore ? $rows->take($limit) : $rows;
+
+        return [
+            'items'       => $items,
+            'next_cursor' => $hasMore ? $items->last()?->id : null,
+        ];
+    }
+
+    /**
+     * Who liked a post, newest first. The Like tab on Post Details had no endpoint to ask,
+     * so it showed the post's own author and called him the one liker; this is the answer
+     * to the question it was actually asking.
+     *
+     * Blocked people drop out in both directions, the same rule {@see comments()} applies
+     * to a thread — D.9c's "cannot ... see" covers a like as much as a comment.
+     *
+     * @return array{items: Collection<int, PostLike>, next_cursor: int|null}
+     */
+    public function likers(Post $post, ?User $viewer, ?int $beforeId, int $limit): array
+    {
+        $this->assertVisible($post, $viewer);
+
+        $query = PostLike::query()
+            ->where('post_id', $post->id)
+            ->with(['user.profile:id,user_id,display_name,avatar_url']);
+
+        if ($viewer !== null) {
+            $query->whereNotExists(fn ($sub) => $sub
+                ->selectRaw('1')
+                ->from('blocks')
+                ->where(fn ($b) => $b
+                    ->where(fn ($x) => $x->where('blocks.blocker_id', $viewer->id)->whereColumn('blocks.blocked_id', 'post_likes.user_id'))
+                    ->orWhere(fn ($x) => $x->whereColumn('blocks.blocker_id', 'post_likes.user_id')->where('blocks.blocked_id', $viewer->id))));
+        }
+
+        if ($beforeId !== null) {
+            $query->where('post_likes.id', '<', $beforeId);
+        }
+
+        // Descending: the most recent like is the one worth seeing first, as in the feed.
+        $rows = $query->orderByDesc('post_likes.id')->limit($limit + 1)->get();
 
         $hasMore = $rows->count() > $limit;
         $items = $hasMore ? $rows->take($limit) : $rows;

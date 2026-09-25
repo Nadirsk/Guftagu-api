@@ -6,11 +6,14 @@ use App\Domain\Moderation\ContentFilter;
 use App\Events\Posts\PostCommented;
 use App\Events\Posts\PostCreated;
 use App\Events\Posts\PostLiked;
+use App\Http\Controllers\Api\MediaController;
 use App\Models\BannedWord;
 use App\Models\Post;
 use App\Models\PostComment;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\Test;
 
 /** Epic D.3d acceptance criteria — moments: visibility, likes, comments, realtime. */
@@ -235,7 +238,7 @@ class MomentsTest extends MobileTestCase
     }
 
     #[Test]
-    public function liking_your_own_moment_does_not_notify_you(): void
+    public function liking_your_own_moment_notifies_you(): void
     {
         Event::fake([PostLiked::class]);
 
@@ -247,11 +250,10 @@ class MomentsTest extends MobileTestCase
         Event::assertDispatched(PostLiked::class, function (PostLiked $e) use ($post, $author) {
             $channels = array_map(fn ($c) => (string) $c, $e->broadcastOn());
 
-            return $channels === ["private-post.{$post->uuid}"]
-                && ! in_array("private-user.{$author->uuid}", $channels, true);
+            return $channels === ["private-post.{$post->uuid}"];
         });
 
-        $this->assertDatabaseMissing('notifications', ['user_id' => $author->id, 'type' => 'post.liked']);
+        $this->assertDatabaseHas('notifications', ['user_id' => $author->id, 'type' => 'post.liked']);
     }
 
     #[Test]
@@ -446,5 +448,217 @@ class MomentsTest extends MobileTestCase
         );
 
         $this->assertCount(4, array_unique($seen));
+    }
+
+    // ------------------------------------------------- feed scopes (app tabs)
+
+    #[Test]
+    public function the_discover_scope_hides_people_you_already_follow_and_yourself(): void
+    {
+        $me = $this->actingAsUser($this->makeUser('Me'));
+        $followed = $this->makeUser('Followed');
+        $stranger = $this->makeUser('Stranger');
+
+        $this->follow($me, $followed);
+
+        $mine = $this->makePost($me, Post::PUBLIC, 'mine');
+        $theirs = $this->makePost($followed, Post::PUBLIC, 'followed');
+        $other = $this->makePost($stranger, Post::PUBLIC, 'stranger');
+
+        $discover = array_column($this->getJson("{$this->base}/feed?scope=discover")->assertOk()->json('data'), 'uuid');
+
+        $this->assertSame([$other->uuid], $discover);
+        $this->assertNotContains($mine->uuid, $discover);
+        $this->assertNotContains($theirs->uuid, $discover);
+    }
+
+    #[Test]
+    public function following_and_discover_never_show_the_same_moment(): void
+    {
+        $me = $this->actingAsUser($this->makeUser('Me'));
+        $followed = $this->makeUser('Followed');
+        $stranger = $this->makeUser('Stranger');
+
+        $this->follow($me, $followed);
+        $this->makePost($followed, Post::PUBLIC, 'followed');
+        $this->makePost($stranger, Post::PUBLIC, 'stranger');
+
+        $following = array_column($this->getJson("{$this->base}/feed?scope=following")->assertOk()->json('data'), 'uuid');
+        $discover = array_column($this->getJson("{$this->base}/feed?scope=discover")->assertOk()->json('data'), 'uuid');
+
+        $this->assertSame([], array_intersect($following, $discover));
+    }
+
+    #[Test]
+    public function following_someone_moves_their_moment_between_the_two_tabs(): void
+    {
+        $this->actingAsUser($this->makeUser('Me'));
+        $author = $this->makeUser('Author');
+        $post = $this->makePost($author, Post::PUBLIC, 'theirs');
+
+        $this->assertSame(
+            [$post->uuid],
+            array_column($this->getJson("{$this->base}/feed?scope=discover")->json('data'), 'uuid'),
+        );
+
+        $this->postJson("{$this->base}/users/{$author->uuid}/follow")->assertOk();
+
+        $this->assertSame([], $this->getJson("{$this->base}/feed?scope=discover")->json('data'));
+        $this->assertSame(
+            [$post->uuid],
+            array_column($this->getJson("{$this->base}/feed?scope=following")->json('data'), 'uuid'),
+        );
+    }
+
+    #[Test]
+    public function an_unknown_feed_scope_is_refused(): void
+    {
+        $this->actingAsUser($this->makeUser('Me'));
+
+        $this->getJson("{$this->base}/feed?scope=nonsense")->assertStatus(422);
+    }
+
+    // ------------------------------------------------------------------ likers
+
+    #[Test]
+    public function the_likes_list_names_who_liked_the_post_newest_first(): void
+    {
+        $author = $this->makeUser('Author');
+        $first  = $this->makeUser('First');
+        $second = $this->makeUser('Second');
+
+        $this->actingAsUser($author);
+        $post = $this->postJson("{$this->base}/posts", ['type' => Post::TEXT, 'body' => 'Hi'])
+            ->json('data.post.uuid');
+
+        $this->actingAsUser($first);
+        $this->postJson("{$this->base}/posts/{$post}/like")->assertOk();
+        $this->actingAsUser($second);
+        $this->postJson("{$this->base}/posts/{$post}/like")->assertOk();
+
+        $this->actingAsUser($author);
+        $names = $this->getJson("{$this->base}/posts/{$post}/likes")
+            ->assertOk()
+            ->json('data.*.display_name');
+
+        // `makeUser` makes each display name unique, so compare against what it made.
+        $this->assertSame(
+            [$second->profile->display_name, $first->profile->display_name],
+            $names,
+        );
+    }
+
+    #[Test]
+    public function a_post_nobody_liked_has_an_empty_likes_list(): void
+    {
+        $author = $this->makeUser('Author');
+        $this->actingAsUser($author);
+        $post = $this->postJson("{$this->base}/posts", ['type' => Post::TEXT, 'body' => 'Hi'])
+            ->json('data.post.uuid');
+
+        $this->getJson("{$this->base}/posts/{$post}/likes")->assertOk()->assertJsonCount(0, 'data');
+    }
+
+    // ------------------------------------------------------------ media upload
+
+    #[Test]
+    public function an_image_upload_returns_a_url_and_its_kind(): void
+    {
+        $disk = config('filesystems.uploads_disk', 'public');
+        Storage::fake($disk);
+        $this->actingAsUser($this->makeUser('Me'));
+
+        $response = $this->post("{$this->base}/media", [
+            'file' => UploadedFile::fake()->image('shot.jpg'),
+        ])->assertOk();
+
+        $this->assertSame('image', $response->json('data.kind'));
+        $this->assertNotEmpty($response->json('data.url'));
+        Storage::disk($disk)->assertExists($response->json('data.path'));
+    }
+
+    #[Test]
+    public function a_video_upload_is_reported_as_a_video(): void
+    {
+        Storage::fake(config('filesystems.uploads_disk', 'public'));
+        $this->actingAsUser($this->makeUser('Me'));
+
+        $this->post("{$this->base}/media", [
+            'file' => UploadedFile::fake()->create('clip.mp4', 128, 'video/mp4'),
+        ])->assertOk()->assertJsonPath('data.kind', 'video');
+    }
+
+    #[Test]
+    public function a_media_file_over_the_size_cap_is_refused(): void
+    {
+        Storage::fake(config('filesystems.uploads_disk', 'public'));
+        $this->actingAsUser($this->makeUser('Me'));
+
+        $this->post("{$this->base}/media", [
+            'file' => UploadedFile::fake()->create('clip.mp4', MediaController::MAX_KB + 1, 'video/mp4'),
+        ])->assertStatus(422);
+    }
+
+    #[Test]
+    public function a_moment_cannot_carry_more_than_six_media(): void
+    {
+        $this->actingAsUser($this->makeUser('Me'));
+
+        $urls = array_map(fn ($i) => "https://cdn.test/{$i}.jpg", range(1, 7));
+
+        $this->postJson("{$this->base}/posts", [
+            'type'       => Post::IMAGE,
+            'body'       => 'Too many',
+            'media_urls' => $urls,
+        ])->assertStatus(422);
+    }
+
+    /** A streamed upload names the part after a cache file that may have none. */
+    #[Test]
+    public function a_video_with_no_filename_extension_is_still_reported_as_a_video(): void
+    {
+        Storage::fake(config('filesystems.uploads_disk', 'public'));
+        $this->actingAsUser($this->makeUser('Me'));
+
+        $this->post("{$this->base}/media", [
+            'file' => UploadedFile::fake()->create('upload', 128, 'video/mp4'),
+        ])->assertOk()->assertJsonPath('data.kind', 'video');
+    }
+
+    /** A clip long enough to be worth posting — the old 10 MB cap refused these. */
+    #[Test]
+    public function a_video_of_several_tens_of_megabytes_is_accepted(): void
+    {
+        Storage::fake(config('filesystems.uploads_disk', 'public'));
+        $this->actingAsUser($this->makeUser('Me'));
+
+        $this->post("{$this->base}/media", [
+            'file' => UploadedFile::fake()->create('clip.mp4', 60 * 1024, 'video/mp4'),
+        ])->assertOk()->assertJsonPath('data.kind', 'video');
+    }
+
+    #[Test]
+    public function a_file_that_is_neither_image_nor_video_is_refused(): void
+    {
+        Storage::fake(config('filesystems.uploads_disk', 'public'));
+        $this->actingAsUser($this->makeUser('Me'));
+
+        $this->post("{$this->base}/media", [
+            'file' => UploadedFile::fake()->create('notes.pdf', 16, 'application/pdf'),
+        ])->assertStatus(422);
+    }
+
+    #[Test]
+    public function a_moment_can_carry_several_media_urls_as_one_video_post(): void
+    {
+        $this->actingAsUser($this->makeUser('Me'));
+
+        $this->postJson("{$this->base}/posts", [
+            'type'       => Post::VIDEO,
+            'body'       => 'Trip',
+            'media_urls' => ['https://cdn.test/a.jpg', 'https://cdn.test/b.mp4'],
+        ])->assertStatus(201)
+            ->assertJsonPath('data.post.type', Post::VIDEO)
+            ->assertJsonCount(2, 'data.post.media_urls');
     }
 }

@@ -24,8 +24,15 @@ class Post extends Model
     public const TEXT = 'text';
     public const IMAGE = 'image';
     public const AUDIO = 'audio';
+    public const VIDEO = 'video';
 
-    public const TYPES = [self::TEXT, self::IMAGE, self::AUDIO];
+    /**
+     * One post can hold images *and* clips (`media_urls` takes up to nine), and
+     * `type` is a single column, so it records the heaviest kind present: a
+     * mixed post is a `video`. The client renders each URL by its own
+     * extension, so `type` only has to be good enough to pick an icon.
+     */
+    public const TYPES = [self::TEXT, self::IMAGE, self::AUDIO, self::VIDEO];
 
     public const PUBLIC = 'public';
     public const FOLLOWERS = 'followers';

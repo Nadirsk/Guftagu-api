@@ -27,6 +27,10 @@ return [
     */
     'uploads_disk' => env('UPLOADS_DISK', 'public'),
 
+    // Top-level folder for this app's uploads. The Vultr bucket is shared with mehfil
+    // (which writes under `mehfil/`), so Guftagu's files go under their own prefix.
+    'uploads_prefix' => env('UPLOADS_PREFIX', 'guftagu'),
+
     /*
     |--------------------------------------------------------------------------
     | Filesystem Disks

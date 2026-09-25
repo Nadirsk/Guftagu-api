@@ -411,7 +411,7 @@ MD,
 #[OA\Post(
     path: '/admin/store-items/image',
     summary: 'Upload a store item image',
-    description: '`id` is optional: creating an item has none yet, so the panel just holds the returned URL until Save. Editing one has an id, and passing it here saves the image immediately.',
+    description: '`id` is optional: creating an item has none yet, so the panel just holds the returned URL until Save. Editing one has an id, and passing it here saves the image immediately. Stored as `guftagu/storeItem/{id}/photo_{unix time}.{ext}`.',
     security: [['bearerAuth' => []]],
     tags: ['VIP'],
     requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(
@@ -422,6 +422,24 @@ MD,
         ])
     )),
     responses: [new OA\Response(response: 200, description: 'Uploaded', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
+)]
+#[OA\Post(
+    path: '/admin/store-items/animation',
+    summary: 'Upload a store item animation (frame / entrance effect)',
+    description: 'Accepts SVGA, Lottie (.json) or MP4 up to **10 MB**, checked by file extension. Stored as `guftagu/storeItem/{id}/animation_{unix time}.{ext}` — the file keeps its real extension. `id` works like `/admin/store-items/image`: pass it and `animation_url` is saved onto the item immediately (plus `animation_type` for an entrance effect); omit it while creating and send the returned `url` as `animation_url`.',
+    security: [['bearerAuth' => []]],
+    tags: ['VIP'],
+    requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(
+        mediaType: 'multipart/form-data',
+        schema: new OA\Schema(required: ['file'], properties: [
+            new OA\Property(property: 'file', type: 'string', format: 'binary'),
+            new OA\Property(property: 'id', type: 'integer', nullable: true, description: 'An existing item\'s id, to save immediately'),
+        ])
+    )),
+    responses: [
+        new OA\Response(response: 200, description: 'Uploaded — data has `url`, `path`, `size` and `type` (svga | lottie | mp4)', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — over the size cap, or not an SVGA/JSON/MP4 file', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+    ]
 )]
 class StorePaths
 {

@@ -22,6 +22,10 @@ use Illuminate\Validation\Rule;
 class StoreItemController extends Controller
 {
     public const MAX_IMAGE_KB = 5120;
+    public const MAX_ANIMATION_KB = 10240;   // same cap as gift animations (A.6a)
+
+    /** File extension → the `animation_type` value an entrance effect stores. */
+    public const ANIMATION_EXTENSIONS = ['svga' => 'svga', 'json' => 'lottie', 'mp4' => 'mp4'];
 
     public function __construct(
         protected AuditLogger $audit,
@@ -98,7 +102,7 @@ class StoreItemController extends Controller
             'file.max' => 'That image is larger than '.(self::MAX_IMAGE_KB / 1024).' MB.',
         ]);
 
-        $result = $this->uploads->store($request->file('file'), 'store-items');
+        $result = $this->uploads->storeFor($request->file('file'), 'storeItem', $data['id'] ?? null, 'photo');
 
         if (! empty($data['id'])) {
             $item = StoreItem::findOrFail($data['id']);
@@ -110,6 +114,50 @@ class StoreItemController extends Controller
         }
 
         return ApiResponse::success($result, 'Image uploaded');
+    }
+
+    /**
+     * Animation upload for frames and entrance effects — SVGA, Lottie JSON or MP4.
+     *
+     * Validated by extension, not mimetype: an SVGA file sniffs as zip, zlib or plain
+     * octet-stream depending on its version, so a mimetype rule rejects valid files.
+     * `id` behaves like {@see uploadImage()} — given, the URL (and, for an entrance
+     * effect, `animation_type`) is saved onto that item in this same request.
+     */
+    public function uploadAnimation(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'file' => [
+                'required', 'file', 'max:'.self::MAX_ANIMATION_KB,
+                'extensions:'.implode(',', array_keys(self::ANIMATION_EXTENSIONS)),
+            ],
+            'id' => ['sometimes', 'nullable', 'integer', Rule::exists('store_items', 'id')],
+        ], [
+            'file.max'        => 'That file is larger than '.(self::MAX_ANIMATION_KB / 1024).' MB. Compress it or shorten the animation.',
+            'file.extensions' => 'Upload an SVGA, Lottie (.json) or MP4 file.',
+        ]);
+
+        $file = $request->file('file');
+        $extension = strtolower($file->getClientOriginalExtension());
+        $type = self::ANIMATION_EXTENSIONS[$extension];
+
+        $result = $this->uploads->storeFor($file, 'storeItem', $data['id'] ?? null, 'animation', $extension);
+
+        if (! empty($data['id'])) {
+            $item = StoreItem::findOrFail($data['id']);
+
+            $changes = ['animation_url' => $result['url']];
+            if ($item->type === 'entrance_effect') {
+                $changes['animation_type'] = $type;
+            }
+
+            $before = $item->only(array_keys($changes));
+            $item->forceFill($changes)->save();
+
+            $this->audit->log($request->user(), 'store_item.update', 'vip', StoreItem::class, $item->id, $before, $changes);
+        }
+
+        return ApiResponse::success([...$result, 'type' => $type], 'Animation uploaded');
     }
 
     /** @return array<string, mixed> */
