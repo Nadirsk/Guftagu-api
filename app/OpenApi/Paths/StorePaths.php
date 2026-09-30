@@ -426,7 +426,7 @@ MD,
 #[OA\Post(
     path: '/admin/store-items/animation',
     summary: 'Upload a store item animation (frame / entrance effect)',
-    description: 'Accepts SVGA, Lottie (.json) or MP4 up to **10 MB**, checked by file extension. Stored as `guftagu/storeItem/{id}/animation_{unix time}.{ext}` — the file keeps its real extension. `id` works like `/admin/store-items/image`: pass it and `animation_url` is saved onto the item immediately (plus `animation_type` for an entrance effect); omit it while creating and send the returned `url` as `animation_url`.',
+    description: 'Accepts SVGA, Lottie (.json) or MP4 up to **50 MB**, checked by file extension. Stored as `guftagu/storeItem/{id}/animation_{unix time}.{ext}` — the file keeps its real extension. `id` works like `/admin/store-items/image`: pass it and `animation_url` is saved onto the item immediately (plus `animation_type` for an entrance effect); omit it while creating and send the returned `url` as `animation_url`.',
     security: [['bearerAuth' => []]],
     tags: ['VIP'],
     requestBody: new OA\RequestBody(required: true, content: new OA\MediaType(

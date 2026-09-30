@@ -606,7 +606,7 @@ class StoreManagementTest extends TestCase
 
         $response = $this->actingAs($this->superAdmin, 'sanctum-admin')
             ->postJson($this->base.'/store-items/animation', [
-                'file' => UploadedFile::fake()->create('huge.svga', 20 * 1024),
+                'file' => UploadedFile::fake()->create('huge.svga', 60 * 1024),
             ])
             ->assertStatus(422);
 

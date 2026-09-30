@@ -22,7 +22,9 @@ use Illuminate\Validation\Rule;
 class StoreItemController extends Controller
 {
     public const MAX_IMAGE_KB = 5120;
-    public const MAX_ANIMATION_KB = 10240;   // same cap as gift animations (A.6a)
+    // Entrance effects are full-screen SVGAs and routinely pass 10 MB, so this is higher
+    // than the gift cap. PHP's upload_max_filesize / post_max_size must stay above it.
+    public const MAX_ANIMATION_KB = 51200;   // 50 MB
 
     /** File extension → the `animation_type` value an entrance effect stores. */
     public const ANIMATION_EXTENSIONS = ['svga' => 'svga', 'json' => 'lottie', 'mp4' => 'mp4'];
@@ -136,6 +138,10 @@ class StoreItemController extends Controller
             'file.max'        => 'That file is larger than '.(self::MAX_ANIMATION_KB / 1024).' MB. Compress it or shorten the animation.',
             'file.extensions' => 'Upload an SVGA, Lottie (.json) or MP4 file.',
         ]);
+
+        // A 50 MB push to Vultr can outlast php.ini's max_execution_time (120 s), and on
+        // Windows that limit counts wall-clock time spent waiting on the network too.
+        set_time_limit(300);
 
         $file = $request->file('file');
         $extension = strtolower($file->getClientOriginalExtension());
