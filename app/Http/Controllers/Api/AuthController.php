@@ -254,6 +254,10 @@ class AuthController extends Controller
      * POST /auth/profile/setup — the profile-setup screen shown whenever
      * `requires_profile_setup` is true: gender, name, DOB (18+), country, and an optional
      * invite code (another user's `guftagu_id`).
+     *
+     * `email`/`phone` are here too, unverified — only whichever one signup (OTP/social)
+     * *didn't* already collect reaches this screen blank. Unlike the already-verified one
+     * set at signup, this is a user-entered claim with no proof of ownership behind it.
      */
     public function setupProfile(Request $request): JsonResponse
     {
@@ -264,10 +268,43 @@ class AuthController extends Controller
             'gender'        => ['required', 'string', Rule::in(['male', 'female', 'undisclosed'])],
             'date_of_birth' => ['required', 'date', 'before_or_equal:'.now()->subYears(18)->toDateString()],
             'country'       => ['sometimes', 'nullable', 'string', 'max:80'],
+            'email'         => ['sometimes', 'nullable', 'string', 'email:filter', 'max:191'],
+            'phone'         => ['sometimes', 'nullable', 'string', 'regex:/^[0-9]{6,15}$/'],
             'invite_code'   => ['sometimes', 'nullable', 'string', 'max:20'],
         ], [
             'date_of_birth.before_or_equal' => 'You must be at least 18 years old to register.',
         ]);
+
+        // Only ever filled from blank — the mobile app never sends a value for the one
+        // signup already set, but this guards the API itself against overwriting it.
+        if (! empty($data['email']) && $user->email === null) {
+            $taken = User::query()
+                ->where('email_hash', User::hash($data['email']))
+                ->where('id', '!=', $user->id)
+                ->exists();
+
+            if ($taken) {
+                throw ValidationException::withMessages(['email' => ['That email is already in use.']]);
+            }
+
+            $user->update(['email' => strtolower(trim($data['email']))]);
+        }
+
+        if (! empty($data['phone']) && $user->phone === null) {
+            $taken = User::query()
+                ->where('phone_hash', User::hash($data['phone']))
+                ->where('id', '!=', $user->id)
+                ->exists();
+
+            if ($taken) {
+                throw ValidationException::withMessages(['phone' => ['That phone number is already in use.']]);
+            }
+
+            $user->update([
+                'phone'        => $data['phone'],
+                'country_code' => $user->country_code ?: '+91',
+            ]);
+        }
 
         if (! empty($data['invite_code']) && $user->referred_by_user_id === null) {
             $referrer = User::query()->where('guftagu_id', $data['invite_code'])->first();
@@ -388,6 +425,10 @@ class AuthController extends Controller
         return [
             'uuid'                => $user->uuid,
             'guftagu_id'          => $user->guftagu_id,
+            // Plain, not masked — this is the owner viewing their own account. Masking
+            // (maskedEmail/maskedPhone) is only for staff viewing someone else's PII.
+            'email'               => $user->email,
+            'phone'               => $user->phone,
             'display_name'        => $profile?->display_name,
             'avatar_url'          => $profile?->avatar_url,
             'cover_url'           => $profile?->cover_url,

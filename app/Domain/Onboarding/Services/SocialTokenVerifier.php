@@ -35,12 +35,12 @@ class SocialTokenVerifier
             throw new RuntimeException('That Google sign-in token is invalid or has expired');
         }
 
-        $clientId = config('services.google.client_id');
+        $clientIds = config('services.google.client_ids', []);
         $aud = $response->json('aud');
 
-        // aud must match this app's own client id — otherwise a token minted for a
-        // different Google app would sign in here too.
-        if (! is_string($clientId) || $clientId === '' || $aud !== $clientId) {
+        // aud must match one of this app's own client ids (Android/iOS/Web each have their
+        // own) — otherwise a token minted for a different Google app would sign in here too.
+        if ($clientIds === [] || ! is_string($aud) || ! in_array($aud, $clientIds, true)) {
             throw new RuntimeException('That Google sign-in token was not issued for this app');
         }
 

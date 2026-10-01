@@ -37,8 +37,14 @@ return [
 
     // Epic D.1a — mobile social sign-in. The app sends the id/access token it already
     // obtained from the native SDK; these credentials are only used to verify it server-side.
+    // The mobile app has a separate OAuth client per platform (Android/iOS/Web), each minting
+    // an id_token whose `aud` is that platform's client id — so GOOGLE_CLIENT_ID is a
+    // comma-separated list, one entry per platform client id.
     'google' => [
-        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_ids' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('GOOGLE_CLIENT_ID', ''))
+        ))),
     ],
 
     'facebook' => [
