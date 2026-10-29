@@ -153,7 +153,7 @@ class StoreItemController extends Controller
             $item = StoreItem::findOrFail($data['id']);
 
             $changes = ['animation_url' => $result['url']];
-            if ($item->type === 'entrance_effect') {
+            if (in_array($item->type, StoreItem::ANIMATED_TYPES, true)) {
                 $changes['animation_type'] = $type;
             }
 

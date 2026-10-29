@@ -16,8 +16,7 @@ use Illuminate\Validation\Rule;
 
 /**
  * D.7 — the cosmetics store: frames, chat bubbles, entry banners, entrance effects.
- * Equipping which owned item is active is not implemented — `UserProfile` has no
- * "currently equipped" column for any of these yet (see the FR.D audit).
+ * One owned item per type can be worn at a time (`user_store_items.equipped_at`).
  */
 class StoreController extends Controller
 {
@@ -27,7 +26,7 @@ class StoreController extends Controller
     ) {
     }
 
-    /** GET /store/items — `?type=frame|bubble|entry_banner|entrance_effect`. */
+    /** GET /store/items — `?type=` one of `StoreItem::TYPES`. */
     public function index(Request $request): JsonResponse
     {
         $data = $request->validate(['type' => ['sometimes', Rule::in(StoreItem::TYPES)]]);
@@ -50,7 +49,26 @@ class StoreController extends Controller
             ...$this->payload($o->storeItem),
             'expires_at' => $o->expires_at?->toIso8601ZuluString(),
             'source'     => $o->source,
+            'equipped'   => $o->equipped_at !== null,
         ])->all());
+    }
+
+    /** POST /store/items/{item}/equip — wear it; takes off whatever of that type was on. */
+    public function equip(Request $request, StoreItem $item): JsonResponse
+    {
+        if ($this->inventory->equip($request->user(), $item) === null) {
+            throw new LevelException('NOT_OWNED', 'You do not own that item, or it has expired.', 422);
+        }
+
+        return ApiResponse::success(['store_item_id' => $item->id, 'equipped' => true], 'Equipped');
+    }
+
+    /** DELETE /store/items/{item}/equip */
+    public function unequip(Request $request, StoreItem $item): JsonResponse
+    {
+        $this->inventory->unequip($request->user(), $item);
+
+        return ApiResponse::success(['store_item_id' => $item->id, 'equipped' => false], 'Unequipped');
     }
 
     /** POST /store/items/{item}/purchase */

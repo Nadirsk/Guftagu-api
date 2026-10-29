@@ -359,12 +359,12 @@ MD,
 )]
 #[OA\Get(
     path: '/admin/store-items',
-    summary: 'The Mall catalogue — frames, bubbles, entry banners, entrance effects',
+    summary: 'The Mall catalogue — frames, bubbles, entry banners, entrance effects, profile cards, sound waves, room backgrounds, floating screens',
     description: 'One table discriminated by `type` rather than four near-identical ones. VIP gates are reported as a **level** rather than a raw tier id, because a level is what an operator recognises.',
     security: [['bearerAuth' => []]],
     tags: ['VIP'],
     parameters: [
-        new OA\Parameter(name: 'type', in: 'query', schema: new OA\Schema(type: 'string', enum: ['frame', 'bubble', 'entry_banner', 'entrance_effect'])),
+        new OA\Parameter(name: 'type', in: 'query', schema: new OA\Schema(type: 'string', enum: ['frame', 'bubble', 'entry_banner', 'entrance_effect', 'profile_card', 'mic_wave', 'room_background', 'floating_screen'])),
         new OA\Parameter(name: 'include_inactive', in: 'query', schema: new OA\Schema(type: 'boolean')),
     ],
     responses: [new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(ref: '#/components/schemas/Envelope'))]
@@ -375,11 +375,11 @@ MD,
     security: [['bearerAuth' => []]],
     tags: ['VIP'],
     requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(required: ['type', 'name'], properties: [
-        new OA\Property(property: 'type', type: 'string', enum: ['frame', 'bubble', 'entry_banner', 'entrance_effect']),
+        new OA\Property(property: 'type', type: 'string', enum: ['frame', 'bubble', 'entry_banner', 'entrance_effect', 'profile_card', 'mic_wave', 'room_background', 'floating_screen']),
         new OA\Property(property: 'name', type: 'string'),
         new OA\Property(property: 'image_url', type: 'string', nullable: true),
         new OA\Property(property: 'animation_url', type: 'string', nullable: true),
-        new OA\Property(property: 'animation_type', type: 'string', nullable: true, description: 'entrance_effect only'),
+        new OA\Property(property: 'animation_type', type: 'string', nullable: true, description: 'entrance_effect, profile_card, mic_wave, room_background, floating_screen'),
         new OA\Property(property: 'duration_ms', type: 'integer', nullable: true, description: 'entrance_effect only'),
         new OA\Property(property: 'trigger', type: 'string', nullable: true, enum: ['vip_entry', 'big_gift', 'level_up', 'event'], description: 'entrance_effect only'),
         new OA\Property(property: 'min_gift_coin_value', type: 'integer', nullable: true, description: 'entrance_effect only'),

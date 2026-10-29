@@ -21,7 +21,7 @@ class Room extends Model
 
     protected $fillable = [
         'uuid', 'room_code', 'owner_id', 'category_id', 'theme_id', 'name', 'description',
-        'cover_url', 'announcement', 'visibility', 'password_hash', 'seat_count',
+        'cover_url', 'background_url', 'announcement', 'visibility', 'password_hash', 'seat_count',
         'seat_layout', 'seat_template_id', 'video_enabled', 'status', 'is_featured', 'is_pinned',
         'featured_until', 'listener_count', 'peak_listeners', 'total_diamonds_received',
         'started_at', 'ended_at', 'closed_by', 'close_reason',

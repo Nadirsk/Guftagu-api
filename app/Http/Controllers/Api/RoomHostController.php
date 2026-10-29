@@ -32,6 +32,9 @@ class RoomHostController extends Controller
             'name'             => ['required', 'string', 'max:80'],
             'description'      => ['sometimes', 'nullable', 'string', 'max:300'],
             'cover_url'        => ['sometimes', 'nullable', 'url', 'max:500'],
+            // Create Room's own upload under Room Background, used instead of a theme's.
+            'background_url'   => ['sometimes', 'nullable', 'url', 'max:500'],
+            'announcement'     => ['sometimes', 'nullable', 'string', 'max:500'],
             'category_id'      => ['sometimes', 'nullable', 'integer'],
             'theme_id'         => ['sometimes', 'nullable', 'integer'],
             'seat_template_id' => ['sometimes', 'nullable', 'integer'],
@@ -98,6 +101,19 @@ class RoomHostController extends Controller
         $this->host->removeFromSeat($room, $request->user(), $seat);
 
         return ApiResponse::success(null, 'Removed from seat');
+    }
+
+    /** POST /rooms/{room}/members/{profile}/kick — `{minutes}`, out of the room for that long. */
+    public function kickMember(Request $request, Room $room, User $profile): JsonResponse
+    {
+        $data = $request->validate([
+            // The app offers 5 min, 1 hr, 24 hr and 7 days; anything up to 7 days is accepted.
+            'minutes' => ['required', 'integer', 'min:1', 'max:10080'],
+        ]);
+
+        $this->host->kickMember($room, $request->user(), $profile, (int) $data['minutes']);
+
+        return ApiResponse::success(null, 'Kicked out');
     }
 
     /** PATCH /rooms/{room}/seats/{seat}/lock — `{locked: bool}`. */

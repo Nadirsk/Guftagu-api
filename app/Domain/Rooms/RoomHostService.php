@@ -12,6 +12,7 @@ use App\Models\Room;
 use App\Models\RoomMember;
 use App\Models\RoomSeat;
 use App\Models\User;
+use App\Models\UserSanction;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -168,6 +169,64 @@ class RoomHostService
         ])->save();
 
         SeatVacated::dispatch($room, $seatNumber, $user);
+    }
+
+    /**
+     * The room's own Kick-Out: out of the room and its seat, and kept out for `$minutes`.
+     *
+     * The re-entry block is the same room-scoped `UserSanction` staff kicks write (see
+     * {@see RoomModerationService::kick}), so `Room::isBlockedForUser()` enforces both.
+     * `issued_by` stays null — that column points at `admin_users`, and a host is not one.
+     *
+     * @throws RoomException
+     */
+    public function kickMember(Room $room, User $actor, User $target, int $minutes): void
+    {
+        $this->assertIsHost($room, $actor);
+
+        if ($target->id === $actor->id || $target->id === $room->owner_id) {
+            throw new RoomException('BAD_REQUEST', 'You cannot kick that person out of this room.', 400);
+        }
+
+        $member = $this->activeMember($room, $target);
+
+        if ($member === null) {
+            throw new RoomException('NOT_FOUND', 'That person is not currently in this room.', 404);
+        }
+
+        $seatNumber = DB::transaction(function () use ($room, $member, $target, $minutes) {
+            $member->forceFill([
+                'is_active'        => false,
+                'left_at'          => now(),
+                'duration_seconds' => $member->joined_at?->diffInSeconds(now()) ?? 0,
+            ])->save();
+
+            $seat = $room->seats()->where('user_id', $target->id)->first();
+            $seat?->forceFill([
+                'user_id'           => null,
+                'occupied_at'       => null,
+                'is_self_muted'     => false,
+                'is_muted_by_owner' => false,
+                'is_camera_on'      => false,
+            ])->save();
+
+            UserSanction::create([
+                'user_id'    => $target->id,
+                'type'       => UserSanction::ROOM_BAN,
+                'scope'      => 'room',
+                'room_id'    => $room->id,
+                'reason'     => 'Kicked out by the room host',
+                'starts_at'  => now(),
+                'expires_at' => now()->addMinutes($minutes),
+                'is_active'  => true,
+            ]);
+
+            return $seat?->seat_number;
+        });
+
+        if ($seatNumber !== null) {
+            SeatVacated::dispatch($room, $seatNumber, $target);
+        }
     }
 
     /** @throws RoomException */

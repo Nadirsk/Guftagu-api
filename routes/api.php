@@ -57,6 +57,7 @@ use App\Http\Controllers\Api\ProgressionController;
 use App\Http\Controllers\Api\RankingController as ApiRankingController;
 use App\Http\Controllers\Api\RechargeController;
 use App\Http\Controllers\Api\RoomCatalogueController as ApiRoomCatalogueController;
+use App\Http\Controllers\Api\ProfileController as ApiProfileController;
 use App\Http\Controllers\Api\RoomChatController;
 use App\Http\Controllers\Api\RoomController as ApiRoomController;
 use App\Http\Controllers\Api\RoomGiftController;
@@ -192,6 +193,9 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::post('users/{profile}/visit', [VisitorController::class, 'store'])->name('users.visit');
     Route::get('users/{profile}/visitors', [VisitorController::class, 'index'])->name('users.visitors');
     Route::get('users/{profile}/posts', [PostController::class, 'forUser'])->name('users.posts');
+    // ---- the Profile screen's counts and its Gift tab (Figma 676:4517 / 595:3620)
+    Route::get('users/{profile}/stats', [ApiProfileController::class, 'stats'])->name('users.stats');
+    Route::get('users/{profile}/gifts', [ApiProfileController::class, 'gifts'])->name('users.gifts');
 
     // ---- messaging (D.4)
     Route::get('conversations', [ConversationController::class, 'index'])->name('conversations.index');
@@ -235,6 +239,8 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::get('store/items', [ApiStoreController::class, 'index'])->name('store.items.index');
     Route::get('store/items/mine', [ApiStoreController::class, 'mine'])->name('store.items.mine');
     Route::post('store/items/{item}/purchase', [ApiStoreController::class, 'purchase'])->name('store.items.purchase');
+    Route::post('store/items/{item}/equip', [ApiStoreController::class, 'equip'])->name('store.items.equip');
+    Route::delete('store/items/{item}/equip', [ApiStoreController::class, 'unequip'])->name('store.items.unequip');
 
     // ---- rankings (D.8)
     Route::get('rankings', [ApiRankingController::class, 'board'])->name('rankings.board');
@@ -266,6 +272,10 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     // ---- create a room (D.2a). Not nested under {room:uuid} — there isn't one yet.
     Route::post('rooms', [RoomHostController::class, 'store'])->name('rooms.store');
 
+    // ---- other live rooms, for the in-room drawer and the Live tab. Ahead of the
+    // {room:uuid} group so "live" is never read as a room uuid.
+    Route::get('rooms/live', [ApiRoomController::class, 'live'])->name('rooms.live');
+
     // ---- voice rooms: join, seats, self mic/camera (docs/03 §4). Audio/video is
     // peer-to-peer WebRTC, signalled over the `room.{uuid}` presence channel
     // (routes/channels.php) — nothing here mints an Agora token, there isn't one.
@@ -285,12 +295,14 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         Route::post('seats/{seat}/invite', [RoomHostController::class, 'inviteToSeat'])->name('seats.invite');
         Route::post('seats/{seat}/mute', [RoomHostController::class, 'muteSeat'])->name('seats.mute');
         Route::post('seats/{seat}/remove', [RoomHostController::class, 'removeFromSeat'])->name('seats.remove');
+        Route::post('members/{profile}/kick', [RoomHostController::class, 'kickMember'])->name('members.kick');
         Route::patch('seats/{seat}/lock', [RoomHostController::class, 'lockSeat'])->name('seats.lock');
         Route::patch('announcement', [RoomHostController::class, 'setAnnouncement'])->name('announcement');
 
         // ---- in-room chat (D.2d)
         Route::get('messages', [RoomChatController::class, 'index'])->name('messages.index');
         Route::post('messages', [RoomChatController::class, 'store'])->name('messages.store');
+        Route::post('casual', [RoomChatController::class, 'casual'])->name('casual');
 
         // ---- gifting within this room (D.6a)
         Route::get('gifts', [RoomGiftController::class, 'index'])->name('gifts.index');

@@ -84,6 +84,8 @@ class RoomCreationService
                 'name'             => trim((string) $data['name']),
                 'description'      => $data['description'] ?? null,
                 'cover_url'        => $data['cover_url'] ?? null,
+                'background_url'   => $data['background_url'] ?? null,
+                'announcement'     => isset($data['announcement']) ? trim((string) $data['announcement']) : null,
                 'visibility'       => $visibility,
                 'password_hash'    => $visibility === 'private' ? Hash::make($data['password']) : null,
                 'seat_count'       => $seatCount,

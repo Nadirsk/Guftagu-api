@@ -15,13 +15,14 @@ class UserStoreItem extends Model
 {
     public const SOURCES = ['purchase', 'vip', 'event', 'admin'];
 
-    protected $fillable = ['user_id', 'store_item_id', 'starts_at', 'expires_at', 'source'];
+    protected $fillable = ['user_id', 'store_item_id', 'starts_at', 'expires_at', 'equipped_at', 'source'];
 
     protected function casts(): array
     {
         return [
-            'starts_at'  => 'datetime',
-            'expires_at' => 'datetime',
+            'starts_at'   => 'datetime',
+            'expires_at'  => 'datetime',
+            'equipped_at' => 'datetime',
         ];
     }
 

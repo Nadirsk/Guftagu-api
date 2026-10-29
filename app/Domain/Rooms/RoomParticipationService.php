@@ -2,8 +2,12 @@
 
 namespace App\Domain\Rooms;
 
+use App\Domain\Store\InventoryService;
 use App\Events\Rooms\CameraToggled;
+use App\Events\Rooms\EntranceEffectPlayed;
 use App\Events\Rooms\HandRaiseToggled;
+use App\Events\Rooms\MemberJoined;
+use App\Events\Rooms\MemberLeft;
 use App\Events\Rooms\MicToggled;
 use App\Events\Rooms\SeatOccupied;
 use App\Events\Rooms\SeatVacated;
@@ -24,6 +28,10 @@ use Illuminate\Support\Facades\Hash;
  */
 class RoomParticipationService
 {
+    public function __construct(protected InventoryService $inventory)
+    {
+    }
+
     /** @throws RoomException */
     public function join(Room $room, User $user, ?string $password = null): RoomMember
     {
@@ -51,13 +59,17 @@ class RoomParticipationService
             throw new RoomException('FORBIDDEN', 'That password is not correct.', 403);
         }
 
-        return DB::transaction(function () use ($room, $user) {
+        $arrived = false;
+
+        $member = DB::transaction(function () use ($room, $user, &$arrived) {
             $member = RoomMember::query()
                 ->where('room_id', $room->id)
                 ->where('user_id', $user->id)
                 ->first();
 
             if ($member === null) {
+                $arrived = true;
+
                 return RoomMember::create([
                     'room_id'   => $room->id,
                     'user_id'   => $user->id,
@@ -68,6 +80,7 @@ class RoomParticipationService
             }
 
             if (! $member->is_active) {
+                $arrived = true;
                 $member->forceFill([
                     'is_active'        => true,
                     'joined_at'        => now(),
@@ -78,14 +91,26 @@ class RoomParticipationService
 
             return $member;
         });
+
+        // A reconnect by someone already inside announces nothing.
+        if ($arrived) {
+            $this->announce(new MemberJoined($room, $user, $room->activeMembers()->count()));
+
+            $arrival = $this->inventory->arrival($user);
+            if ($arrival !== null) {
+                $this->announce(new EntranceEffectPlayed($room, $user, $arrival));
+            }
+        }
+
+        return $member;
     }
 
     public function leave(Room $room, User $user): void
     {
-        DB::transaction(function () use ($room, $user) {
+        $left = DB::transaction(function () use ($room, $user) {
             $this->vacateOwnSeat($room, $user);
 
-            RoomMember::query()
+            return RoomMember::query()
                 ->where('room_id', $room->id)
                 ->where('user_id', $user->id)
                 ->where('is_active', true)
@@ -95,6 +120,24 @@ class RoomParticipationService
                     'duration_seconds' => DB::raw('TIMESTAMPDIFF(SECOND, joined_at, NOW())'),
                 ]);
         });
+
+        if ($left > 0) {
+            $this->announce(new MemberLeft($room, $user, $room->activeMembers()->count()));
+        }
+    }
+
+    /**
+     * Arrival and departure broadcasts are decoration — the join or leave has already
+     * committed. Unlike the seat events (which other peers' WebRTC depends on), a socket
+     * hiccup here is reported and swallowed rather than failing the request.
+     */
+    protected function announce(object $event): void
+    {
+        try {
+            event($event);
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     /**

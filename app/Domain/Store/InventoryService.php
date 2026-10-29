@@ -10,6 +10,7 @@ use App\Models\UserStoreItem;
 use App\Models\UserVipSubscription;
 use App\Models\VipTier;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * The entitlement layer events, VIP purchases and the store all grant through — the
@@ -144,6 +145,92 @@ class InventoryService
             ->when($type !== null, fn ($q) => $q->whereHas('storeItem', fn ($q2) => $q2->where('type', $type)))
             ->get()
             ->values();
+    }
+
+    /**
+     * Wear one owned item. One item per type is worn at a time, so equipping a frame takes
+     * off whichever frame was on before. Returns null when the user does not own the item
+     * or it has expired.
+     */
+    public function equip(User $user, StoreItem $item): ?UserStoreItem
+    {
+        $owned = UserStoreItem::query()
+            ->where('user_id', $user->id)
+            ->where('store_item_id', $item->id)
+            ->active()
+            ->first();
+
+        if ($owned === null) {
+            return null;
+        }
+
+        DB::transaction(function () use ($user, $item, $owned) {
+            UserStoreItem::query()
+                ->where('user_id', $user->id)
+                ->whereNotNull('equipped_at')
+                ->whereHas('storeItem', fn ($q) => $q->where('type', $item->type))
+                ->update(['equipped_at' => null]);
+
+            $owned->forceFill(['equipped_at' => now()])->save();
+        });
+
+        return $owned;
+    }
+
+    /** Take an item off. Not owning it is not an error — there is nothing to take off. */
+    public function unequip(User $user, StoreItem $item): void
+    {
+        UserStoreItem::query()
+            ->where('user_id', $user->id)
+            ->where('store_item_id', $item->id)
+            ->update(['equipped_at' => null]);
+    }
+
+    /** The item of `$type` the user is wearing right now, if it has not expired. */
+    public function equipped(User $user, string $type): ?StoreItem
+    {
+        return UserStoreItem::query()
+            ->where('user_id', $user->id)
+            ->whereNotNull('equipped_at')
+            ->active()
+            ->whereHas('storeItem', fn ($q) => $q->where('type', $type)->where('is_active', true))
+            ->with('storeItem')
+            ->latest('equipped_at')
+            ->first()
+            ?->storeItem;
+    }
+
+    /**
+     * What plays when this user walks into a room: their VIP tier (the "VIP4 Enter" banner),
+     * the entry banner and the entrance effect they are wearing. Null when there is nothing
+     * to show — a plain arrival is just the chat line.
+     *
+     * @return array{vip: array{level: int, name: string}|null, banner: array<string, mixed>|null, effect: array<string, mixed>|null}|null
+     */
+    public function arrival(User $user): ?array
+    {
+        $tier = $this->activeVip($user)?->vipTier;
+        $banner = $this->equipped($user, StoreItem::TYPE_ENTRY_BANNER);
+        $effect = $this->equipped($user, StoreItem::TYPE_ENTRANCE_EFFECT);
+
+        if ($tier === null && $banner === null && $effect === null) {
+            return null;
+        }
+
+        return [
+            'vip'    => $tier === null ? null : ['level' => $tier->level, 'name' => $tier->name_en],
+            'banner' => $banner === null ? null : [
+                'name'      => $banner->name,
+                'image_url' => $banner->image_url,
+            ],
+            'effect' => $effect === null ? null : [
+                'name'           => $effect->name,
+                'image_url'      => $effect->image_url,
+                'animation_url'  => $effect->animation_url,
+                'animation_type' => $effect->animation_type,
+                'duration_ms'    => $effect->duration_ms,
+            ],
+        ];
     }
 
     /** A required tier is a floor, not an exact match — level 3 satisfies a level-2 gate. */

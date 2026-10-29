@@ -22,7 +22,10 @@ use Illuminate\Validation\Rule;
 class GiftController extends Controller
 {
     /** A.6a — "a 60 MB animation is rejected with a clear size error". */
-    public const MAX_ANIMATION_KB = 10240;   // 10 MB, matching docs/01 §6's image cap
+    public const MAX_ANIMATION_KB = 51200;   // 50 MB, matching StoreItemController's entrance-effect cap
+
+    /** File extension → the `animation_type` value a gift stores. */
+    public const ANIMATION_EXTENSIONS = ['svga' => 'svga', 'json' => 'lottie', 'mp4' => 'mp4'];
     public const MAX_IMAGE_KB = 5120;        // 5 MB — a thumbnail or icon, not an animation
 
     public function __construct(
@@ -140,29 +143,53 @@ class GiftController extends Controller
      * Writes through `ImageUploadService`, so it lands on the local `public` disk until
      * `UPLOADS_DISK=vultr` is set (config/filesystems.php) — the validation is the part
      * that matters either way.
+     *
+     * Validated by extension, not mimetype: an SVGA sniffs as zip, zlib or octet-stream
+     * depending on its version. Same `id` behaviour as {@see uploadThumbnail()}: with `id`,
+     * the URL and inferred `animation_type` are saved onto the gift in this request.
      */
     public function uploadAnimation(Request $request): JsonResponse
     {
-        $request->validate([
+        $data = $request->validate([
             'file' => [
                 'required',
                 'file',
                 // A.6a wants a clear size error, so the cap is stated in the rule rather
                 // than left to PHP's upload_max_filesize producing an empty request.
                 'max:'.self::MAX_ANIMATION_KB,
-                'mimetypes:application/json,application/octet-stream,video/mp4,text/plain',
+                'extensions:'.implode(',', array_keys(self::ANIMATION_EXTENSIONS)),
             ],
-            'type' => ['required', Rule::in(Gift::ANIMATION_TYPES)],
+            'id' => ['sometimes', 'nullable', 'integer', Rule::exists('gifts', 'id')],
         ], [
             'file.max' => 'That file is larger than '.(self::MAX_ANIMATION_KB / 1024).' MB. Compress it or shorten the animation.',
+            'file.extensions' => 'Upload an SVGA, Lottie (.json) or MP4 file.',
         ]);
 
-        $result = $this->uploads->store($request->file('file'), 'gift-animations');
+        // A 50 MB push to Vultr can outlast max_execution_time (wall-clock on Windows).
+        set_time_limit(300);
 
-        return ApiResponse::success(
-            [...$result, 'type' => $request->input('type')],
-            'Animation uploaded',
-        );
+        $file = $request->file('file');
+        $extension = strtolower($file->getClientOriginalExtension());
+        $type = self::ANIMATION_EXTENSIONS[$extension];
+
+        // SVGA's zlib-compressed content sniffs as `application/zlib`, which store()'s
+        // default MIME-guessing would save as a bogus `.zz` extension.
+        $result = $this->uploads->store($file, 'gift-animations', $extension);
+
+        if (! empty($data['id'])) {
+            $gift = Gift::findOrFail($data['id']);
+            $changes = ['animation_url' => $result['url'], 'animation_type' => $type];
+            $before = $gift->only(array_keys($changes));
+
+            $gift->forceFill($changes)->save();
+            $this->catalogue->flush();
+
+            $this->audit->log($request->user(), 'gift.update', 'gifts', Gift::class, $gift->id, $before, $changes);
+
+            $result['gift'] = $this->payload($gift->fresh());
+        }
+
+        return ApiResponse::success([...$result, 'type' => $type], 'Animation uploaded');
     }
 
     /** Thumbnail upload — the still image shown on the gift card, separate from the animation. */

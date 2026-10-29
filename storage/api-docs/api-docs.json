@@ -19187,7 +19187,7 @@
                 "tags": [
                     "VIP"
                 ],
-                "summary": "The Mall catalogue — frames, bubbles, entry banners, entrance effects",
+                "summary": "The Mall catalogue — frames, bubbles, entry banners, entrance effects, profile cards, sound waves, room backgrounds, floating screens",
                 "description": "One table discriminated by `type` rather than four near-identical ones. VIP gates are reported as a **level** rather than a raw tier id, because a level is what an operator recognises.",
                 "operationId": "1e015936e8a7eaa996d69c6655541d22",
                 "parameters": [
@@ -19200,7 +19200,11 @@
                                 "frame",
                                 "bubble",
                                 "entry_banner",
-                                "entrance_effect"
+                                "entrance_effect",
+                                "profile_card",
+                                "mic_wave",
+                                "room_background",
+                                "floating_screen"
                             ]
                         }
                     },
@@ -19252,7 +19256,11 @@
                                             "frame",
                                             "bubble",
                                             "entry_banner",
-                                            "entrance_effect"
+                                            "entrance_effect",
+                                            "profile_card",
+                                            "mic_wave",
+                                            "room_background",
+                                            "floating_screen"
                                         ]
                                     },
                                     "name": {
@@ -19267,7 +19275,7 @@
                                         "nullable": true
                                     },
                                     "animation_type": {
-                                        "description": "entrance_effect only",
+                                        "description": "entrance_effect, profile_card, mic_wave, room_background, floating_screen",
                                         "type": "string",
                                         "nullable": true
                                     },
@@ -19428,7 +19436,7 @@
                     "VIP"
                 ],
                 "summary": "Upload a store item image",
-                "description": "`id` is optional: creating an item has none yet, so the panel just holds the returned URL until Save. Editing one has an id, and passing it here saves the image immediately.",
+                "description": "`id` is optional: creating an item has none yet, so the panel just holds the returned URL until Save. Editing one has an id, and passing it here saves the image immediately. Stored as `guftagu/storeItem/{id}/photo_{unix time}.{ext}`.",
                 "operationId": "096dda4b6bf76bb99c3d8f58094c9a4c",
                 "requestBody": {
                     "required": true,
@@ -19461,6 +19469,67 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/store-items/animation": {
+            "post": {
+                "tags": [
+                    "VIP"
+                ],
+                "summary": "Upload a store item animation (frame / entrance effect)",
+                "description": "Accepts SVGA, Lottie (.json) or MP4 up to **50 MB**, checked by file extension. Stored as `guftagu/storeItem/{id}/animation_{unix time}.{ext}` — the file keeps its real extension. `id` works like `/admin/store-items/image`: pass it and `animation_url` is saved onto the item immediately (plus `animation_type` for an entrance effect); omit it while creating and send the returned `url` as `animation_url`.",
+                "operationId": "ef2364beea59dcee516b884441a54f0e",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "id": {
+                                        "description": "An existing item's id, to save immediately",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Uploaded — data has `url`, `path`, `size` and `type` (svga | lottie | mp4)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_ERROR` — over the size cap, or not an SVGA/JSON/MP4 file",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
                                 }
                             }
                         }

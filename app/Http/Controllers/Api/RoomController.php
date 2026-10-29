@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Domain\Rooms\RoomParticipationService;
+use App\Domain\Store\InventoryService;
 use App\Http\Controllers\Controller;
+use App\Models\GiftTransaction;
 use App\Models\Room;
 use App\Models\RoomMember;
 use App\Models\RoomSeat;
@@ -24,8 +26,54 @@ use Illuminate\Http\Request;
  */
 class RoomController extends Controller
 {
-    public function __construct(protected RoomParticipationService $participation)
+    public function __construct(
+        protected RoomParticipationService $participation,
+        protected InventoryService $inventory,
+    ) {
+    }
+
+    /**
+     * GET /rooms/live — public rooms that are live right now, busiest first: the drawer's
+     * "other rooms" list. `members` is up to five people inside, for the avatar stack.
+     */
+    public function live(Request $request): JsonResponse
     {
+        $data = $request->validate([
+            'limit'  => ['sometimes', 'integer', 'min:1', 'max:50'],
+            'except' => ['sometimes', 'nullable', 'string'],
+        ]);
+
+        $rooms = Room::query()
+            ->where('visibility', 'public')
+            ->where('status', Room::LIVE)
+            ->when($data['except'] ?? null, fn ($q, string $uuid) => $q->where('uuid', '!=', $uuid))
+            ->with(['owner.profile:id,user_id,display_name,avatar_url,country', 'theme:id,background_url'])
+            ->withCount('activeMembers')
+            ->orderByDesc('active_members_count')
+            ->orderByDesc('id')
+            ->limit((int) ($data['limit'] ?? 20))
+            ->get();
+
+        $members = RoomMember::query()
+            ->whereIn('room_id', $rooms->pluck('id'))
+            ->where('is_active', true)
+            ->with('user.profile:id,user_id,display_name,avatar_url')
+            ->latest('joined_at')
+            ->get()
+            ->groupBy('room_id');
+
+        return ApiResponse::success($rooms->map(fn (Room $room) => [
+            'uuid'           => $room->uuid,
+            'name'           => $room->name,
+            'cover_url'      => $room->cover_url ?? $room->background_url ?? $room->theme?->background_url,
+            'listener_count' => $room->active_members_count,
+            'owner'          => SocialPresenter::user($room->owner),
+            'members'        => ($members[$room->id] ?? collect())
+                ->take(5)
+                ->map(fn (RoomMember $m) => SocialPresenter::user($m->user))
+                ->values()
+                ->all(),
+        ])->values()->all());
     }
 
     /** GET /rooms/{room}/state — the single most-called endpoint in the app (docs/03 §194). */
@@ -41,7 +89,12 @@ class RoomController extends Controller
 
         $this->participation->join($room, $request->user(), $data['password'] ?? null);
 
-        return ApiResponse::success($this->snapshot($room, $request->user()), 'Joined');
+        $snapshot = $this->snapshot($room, $request->user());
+        // The joiner is not subscribed yet when `entrance.effect` goes out, so their own
+        // banner travels back with the join instead. Null for a plain arrival.
+        $snapshot['my']['arrival'] = $this->inventory->arrival($request->user());
+
+        return ApiResponse::success($snapshot, 'Joined');
     }
 
     /** POST /rooms/{room}/leave. */
@@ -105,7 +158,15 @@ class RoomController extends Controller
     {
         $room->load(['owner.profile:id,user_id,display_name,avatar_url', 'theme:id,background_url']);
 
-        $seats = $room->seats()->with('user.profile:id,user_id,display_name,avatar_url')->orderBy('seat_number')->get();
+        $seats = $room->seats()->with('user.profile:id,user_id,display_name,avatar_url,gender')->orderBy('seat_number')->get();
+
+        // What each seated person has been sent in this room — the pill under their name.
+        $received = GiftTransaction::query()
+            ->where('room_id', $room->id)
+            ->whereIn('receiver_id', $seats->pluck('user_id')->filter()->all())
+            ->groupBy('receiver_id')
+            ->selectRaw('receiver_id, SUM(coin_value) as total')
+            ->pluck('total', 'receiver_id');
 
         $mySeat = $seats->first(fn (RoomSeat $seat) => $seat->user_id === $viewer->id);
 
@@ -123,11 +184,23 @@ class RoomController extends Controller
                 'status'          => $room->status,
                 'visibility'      => $room->visibility,
                 'listener_count'  => $room->activeMembers()->count(),
+                // The trophy pill in the room header (Figma 34:2382) — what the room has earned.
+                'diamonds'        => (int) $room->total_diamonds_received,
                 'video_enabled'   => $room->video_enabled,
                 'announcement'    => $room->announcement,
                 'theme'           => $room->theme === null ? null : ['background_url' => $room->theme->background_url],
+                // The host's own upload wins over the theme's picture.
+                'background_url'  => $room->background_url ?? $room->theme?->background_url,
             ],
             'owner' => $room->owner === null ? null : SocialPresenter::user($room->owner),
+            // The four newest arrivals, for the avatar row beside the listener count (45:2631).
+            'members' => $room->activeMembers()
+                ->with('user.profile:id,user_id,display_name,avatar_url')
+                ->latest('joined_at')
+                ->limit(4)
+                ->get()
+                ->map(fn (RoomMember $m) => SocialPresenter::user($m->user))
+                ->all(),
             'seats' => $seats->map(fn (RoomSeat $seat) => [
                 'seat_number' => $seat->seat_number,
                 'locked'      => $seat->is_locked,
@@ -135,6 +208,8 @@ class RoomController extends Controller
                 'camera_on'   => $seat->is_camera_on,
                 'muted'       => $seat->isEffectivelyMuted(),
                 'user'        => $seat->user === null ? null : SocialPresenter::user($seat->user),
+                'gender'      => $seat->user?->profile?->gender,
+                'gift_value'  => $seat->user === null ? 0 : (int) ($received[$seat->user_id] ?? 0),
             ]),
             // Who else is asking to speak right now — the host's queue, oldest request first.
             'raised_hands' => $room->activeMembers()

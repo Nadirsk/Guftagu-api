@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Rooms\RoomChatService;
 use App\Http\Controllers\Controller;
+use App\Events\Rooms\CasualPlayed;
 use App\Models\Room;
 use App\Models\RoomMessage;
 use App\Support\ApiResponse;
@@ -11,6 +12,7 @@ use App\Support\Cursor;
 use App\Support\SocialPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 /** D.2d — in-room chat. */
 class RoomChatController extends Controller
@@ -51,5 +53,36 @@ class RoomChatController extends Controller
             'body'       => $message->body,
             'created_at' => $message->created_at?->toIso8601ZuluString(),
         ], 'Sent', 201);
+    }
+
+    /**
+     * POST /rooms/{room}/casual — `{type: dice|mora|machine}`. The server draws the result so
+     * nobody can pick their own roll, and a user can play once every two seconds.
+     */
+    public function casual(Request $request, Room $room): JsonResponse
+    {
+        $data = $request->validate(['type' => ['required', 'in:dice,mora,machine']]);
+        $user = $request->user();
+
+        if (! $room->activeMembers()->where('user_id', $user->id)->exists()) {
+            return ApiResponse::error('not_in_room', 'Join the room first', null, 403);
+        }
+        if (! Cache::add("casual:{$room->id}:{$user->id}", 1, 2)) {
+            return ApiResponse::error('too_fast', 'Slow down a little', null, 429);
+        }
+
+        $result = match ($data['type']) {
+            'dice'    => [random_int(1, 6)],
+            'mora'    => [random_int(0, 2)],
+            'machine' => [random_int(0, 9), random_int(0, 9), random_int(0, 9)],
+        };
+
+        try {
+            CasualPlayed::dispatch($room, $user, $data['type'], $result);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return ApiResponse::success(['type' => $data['type'], 'result' => $result]);
     }
 }
