@@ -14,10 +14,10 @@
 
 Real-time voice chat needs two different things, solved two different ways:
 
-| Job | Who does it | How |
-|---|---|---|
+| Job                                                                              | Who does it                                                    | How                                                                                                                  |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | **Signaling** — "who's here, who's talking, how do two browsers find each other" | Laravel Reverb (self-hosted WebSocket server, Pusher protocol) | Server-broadcast events (`seat.occupied`, etc.) + browser-to-browser "client events" relayed through the same socket |
-| **Media** — the actual audio bytes | WebRTC, browser-to-browser | Direct peer-to-peer connection; once established, audio never touches Reverb or Laravel |
+| **Media** — the actual audio bytes                                               | WebRTC, browser-to-browser                                     | Direct peer-to-peer connection; once established, audio never touches Reverb or Laravel                              |
 
 Reverb is the matchmaker. It never carries a single byte of audio — its job ends the moment
 two browsers have exchanged enough information to open a direct connection to each other.
@@ -36,14 +36,14 @@ two browsers have exchanged enough information to open a direct connection to ea
 
 ## 3. Backend pieces
 
-| File | Role |
-|---|---|
-| `app/Domain/Rooms/RoomParticipationService.php` | The user's own join/leave, seat take/leave, self-mute, self-camera — separate from the admin-only `RoomService`/`RoomModerationService`. |
-| `app/Http/Controllers/Api/RoomController.php` | `GET /rooms/{uuid}/state`, `POST .../join`, `POST .../leave`, `POST .../seats/{n}/take`, `POST .../seats/leave`, `PATCH .../mic`, `PATCH .../camera`. Matches the paths in `03-api-contract.md` §4; drops the Agora `rtc` block from the `state` response and adds a `signaling` block instead (channel name + STUN server). |
-| `app/Events/Rooms/{SeatOccupied,SeatVacated,MicToggled,CameraToggled}.php` | `ShouldBroadcastNow` events on the `room.{uuid}` **presence** channel. |
-| `routes/channels.php` — `room.{uuid}` | Presence-channel authorization: must be an active, non-banned `room_members` row. Presence (not private) because the client needs "who's actually connected right now" for free — that's what a presence channel already tracks via `pusher:member_added`/`member_removed`. |
-| `routes/api.php` | Registers the above under the existing `auth:sanctum` mobile group, plus a `local`-only `GET /dev/login-as/{user}` (mirrors `Admin\DevHelperController`'s pattern) so the demo seat/voice flow can be exercised without building OTP/SMS delivery first. |
-| `.env` `BROADCAST_CONNECTION=reverb` | Was `log` by default (see `config/broadcasting.php`'s own comment on why) — has to be `reverb` for any environment where a client actually needs to receive events. |
+| File                                                                       | Role                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/Domain/Rooms/RoomParticipationService.php`                            | The user's own join/leave, seat take/leave, self-mute, self-camera — separate from the admin-only `RoomService`/`RoomModerationService`.                                                                                                                                                                                     |
+| `app/Http/Controllers/Api/RoomController.php`                              | `GET /rooms/{uuid}/state`, `POST .../join`, `POST .../leave`, `POST .../seats/{n}/take`, `POST .../seats/leave`, `PATCH .../mic`, `PATCH .../camera`. Matches the paths in `03-api-contract.md` §4; drops the Agora `rtc` block from the `state` response and adds a `signaling` block instead (channel name + STUN server). |
+| `app/Events/Rooms/{SeatOccupied,SeatVacated,MicToggled,CameraToggled}.php` | `ShouldBroadcastNow` events on the `room.{uuid}` **presence** channel.                                                                                                                                                                                                                                                       |
+| `routes/channels.php` — `room.{uuid}`                                      | Presence-channel authorization: must be an active, non-banned `room_members` row. Presence (not private) because the client needs "who's actually connected right now" for free — that's what a presence channel already tracks via `pusher:member_added`/`member_removed`.                                                  |
+| `routes/api.php`                                                           | Registers the above under the existing `auth:sanctum` mobile group, plus a `local`-only `GET /dev/login-as/{user}` (mirrors `Admin\DevHelperController`'s pattern) so the demo seat/voice flow can be exercised without building OTP/SMS delivery first.                                                                     |
+| `.env` `BROADCAST_CONNECTION=reverb`                                       | Was `log` by default (see `config/broadcasting.php`'s own comment on why) — has to be `reverb` for any environment where a client actually needs to receive events.                                                                                                                                                          |
 
 ## 4. Frontend: `resources/views/rooms/show.blade.php`
 
@@ -58,7 +58,7 @@ pusher-js  →  presence-room.{uuid}   (auth via Authorization: Bearer <token> t
 
 `wsHost`/`wsPort`/TLS default to whatever host the browser used to load the page (not the
 server's own `.env` value) — a phone on the LAN loading the page via a LAN IP has to reach
-Reverb at that *same* LAN IP. `?ws_host=&ws_port=&ws_tls=` query params override this for a
+Reverb at that _same_ LAN IP. `?ws_host=&ws_port=&ws_tls=` query params override this for a
 tunnelled setup (ngrok etc.) where the app and Reverb end up on two different public hosts.
 
 ### 4.2 Taking a seat
@@ -80,14 +80,15 @@ just waits for that offer.
 
 ```js
 function ensureConnectionTo(remoteUuid) {
-    if (!state.mySeat || !state.localStream || remoteUuid === state.myUuid) return;
+    if (!state.mySeat || !state.localStream || remoteUuid === state.myUuid)
+        return;
     if (isSpeakerUuid(remoteUuid) && state.myUuid > remoteUuid) return; // let them call me
     callPeer(remoteUuid);
 }
 ```
 
 This is called from three places: `pusher:member_added` (a new listener joins), `seat.occupied`
-(someone becomes a speaker), and once for every existing room member right after *this* client
+(someone becomes a speaker), and once for every existing room member right after _this_ client
 becomes a speaker (`maybeCallEveryone()`).
 
 ### 4.4 The actual handshake
@@ -97,7 +98,7 @@ A (existing speaker)                    B (just sat down)
 ──────────────────────                  ──────────────────
 new RTCPeerConnection()
 addTrack(my mic)
-createOffer() / setLocalDescription()
+createOffer() /  iska()
 ──── client-signal {type:'offer'} ────▶
                                          new RTCPeerConnection()
                                          addTrack(my mic)   // if B is also seated
@@ -167,7 +168,7 @@ sends a fresh offer covering whatever tracks are now attached — no separate "c
 path exists.
 
 **The `signalingState !== 'stable'` guard matters here specifically**: when client B answers an
-incoming offer, `createPeer()` adds B's own tracks *before* `handleSignal()` calls
+incoming offer, `createPeer()` adds B's own tracks _before_ `handleSignal()` calls
 `setRemoteDescription()` on the same tick — that add would otherwise queue a spurious
 `negotiationneeded` for a connection that's about to be driven by the incoming offer instead.
 By the time that queued event actually runs (it's a task, so it waits for the current
@@ -195,10 +196,11 @@ connect, mute) with zero extra infrastructure. `sessionStorage`-scoped tokens ke
 tabs' sessions independent.
 
 Testing from a second physical device on the same network needs either:
+
 - the LAN IP + `chrome://flags/#unsafely-treat-insecure-origin-as-secure` (per test device), or
 - an HTTPS tunnel (ngrok) — in which case Reverb needs **its own** tunnel too (a second
   `ngrok http 8080`, or both tunnels from one `ngrok start --all` config, since the free plan
-  only allows one *agent session*, not one tunnel), and the page needs
+  only allows one _agent session_, not one tunnel), and the page needs
   `?ws_host=<reverb-tunnel-host>&ws_port=443&ws_tls=1` so the browser's WebSocket target isn't
   assumed to be "same host as the page, port 8080" (true on a LAN, false through two separate
   tunnels).
