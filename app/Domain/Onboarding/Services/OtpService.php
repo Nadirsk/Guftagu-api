@@ -21,7 +21,7 @@ class OtpService
     public function send(string $channel, string $identifier, string $purpose): void
     {
         $ttl = (int) config('guftagu.user_otp.ttl_minutes', 5);
-        $otp = $this->nextOtp();
+        $otp = $this->nextOtp($identifier);
         $hash = User::hash($identifier);
 
         // A new code invalidates any other one in flight for the same identifier+purpose.
@@ -99,8 +99,14 @@ class OtpService
      * fixed value, exactly like AdminAuthService::nextOtp — the environment is checked
      * first and independently of the configured value, so this is inert anywhere but local.
      */
-    protected function nextOtp(): string
+    protected function nextOtp(string $identifier): string
     {
+        $pinned = $this->staticOtpFor($identifier);
+
+        if ($pinned !== null) {
+            return $pinned;
+        }
+
         if (app()->environment('local')) {
             $fixed = config('guftagu.user_otp.static_otp');
 
@@ -112,6 +118,32 @@ class OtpService
         }
 
         return str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * The fixed code for a listed test number (`guftagu.user_otp.static_numbers`), in any
+     * environment, or null for everyone else. Matched on the last 10 digits so "+91…",
+     * "91…" and the bare number all hit the same entry.
+     */
+    protected function staticOtpFor(string $identifier): ?string
+    {
+        $digits = preg_replace('/\D/', '', $identifier);
+
+        if ($digits === '' || str_contains($identifier, '@')) {
+            return null;
+        }
+
+        foreach (explode(',', (string) config('guftagu.user_otp.static_numbers', '')) as $pair) {
+            [$number, $code] = array_pad(explode(':', trim($pair), 2), 2, '');
+            $number = preg_replace('/\D/', '', $number);
+
+            if ($number !== '' && preg_match('/^\d{6}$/', $code) === 1
+                && substr($digits, -10) === substr($number, -10)) {
+                return $code;
+            }
+        }
+
+        return null;
     }
 
     /**

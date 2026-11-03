@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Domain\Rooms\RoomParticipationService;
 use App\Domain\Store\InventoryService;
 use App\Http\Controllers\Controller;
+use App\Models\Follow;
 use App\Models\GiftTransaction;
 use App\Models\Room;
 use App\Models\RoomMember;
@@ -41,23 +42,34 @@ class RoomController extends Controller
         $data = $request->validate([
             'limit'  => ['sometimes', 'integer', 'min:1', 'max:50'],
             'except' => ['sometimes', 'nullable', 'string'],
+            // Party tab: `recent` — rooms I have been in, newest visit first; `following` — rooms
+            // run by people I follow. `sort=new` lists the newest rooms first instead of the busiest.
+            'scope'  => ['sometimes', 'string', 'in:all,recent,following'],
+            'sort'   => ['sometimes', 'string', 'in:recommended,new'],
         ]);
+
+        $me = $request->user();
+        $scope = $data['scope'] ?? 'all';
+        $byNewest = ($data['sort'] ?? 'recommended') === 'new';
 
         $rooms = Room::query()
             ->where('visibility', 'public')
             ->where('status', Room::LIVE)
             ->when($data['except'] ?? null, fn ($q, string $uuid) => $q->where('uuid', '!=', $uuid))
-            ->with(['owner.profile:id,user_id,display_name,avatar_url,country', 'theme:id,background_url'])
+            ->when($scope === 'recent', fn ($q) => $q->whereIn('id', RoomMember::query()->where('user_id', $me->id)->select('room_id')))
+            ->when($scope === 'following', fn ($q) => $q->whereIn('owner_id', Follow::query()->where('follower_id', $me->id)->select('following_id')))
+            ->with(['owner.profile:id,user_id,display_name,avatar_url,gender,country', 'theme:id,background_url'])
             ->withCount('activeMembers')
-            ->orderByDesc('active_members_count')
-            ->orderByDesc('id')
+            ->when($scope === 'recent',
+                fn ($q) => $q->orderByDesc(RoomMember::query()->selectRaw('max(joined_at)')->whereColumn('room_members.room_id', 'rooms.id')->where('user_id', $me->id)),
+                fn ($q) => $byNewest ? $q->orderByDesc('id') : $q->orderByDesc('active_members_count')->orderByDesc('id'))
             ->limit((int) ($data['limit'] ?? 20))
             ->get();
 
         $members = RoomMember::query()
             ->whereIn('room_id', $rooms->pluck('id'))
             ->where('is_active', true)
-            ->with('user.profile:id,user_id,display_name,avatar_url')
+            ->with('user.profile:id,user_id,display_name,avatar_url,gender')
             ->latest('joined_at')
             ->get()
             ->groupBy('room_id');
@@ -156,7 +168,7 @@ class RoomController extends Controller
 
     protected function snapshot(Room $room, User $viewer): array
     {
-        $room->load(['owner.profile:id,user_id,display_name,avatar_url', 'theme:id,background_url']);
+        $room->load(['owner.profile:id,user_id,display_name,avatar_url,gender', 'theme:id,background_url']);
 
         $seats = $room->seats()->with('user.profile:id,user_id,display_name,avatar_url,gender')->orderBy('seat_number')->get();
 
@@ -195,7 +207,7 @@ class RoomController extends Controller
             'owner' => $room->owner === null ? null : SocialPresenter::user($room->owner),
             // The four newest arrivals, for the avatar row beside the listener count (45:2631).
             'members' => $room->activeMembers()
-                ->with('user.profile:id,user_id,display_name,avatar_url')
+                ->with('user.profile:id,user_id,display_name,avatar_url,gender')
                 ->latest('joined_at')
                 ->limit(4)
                 ->get()
@@ -214,7 +226,7 @@ class RoomController extends Controller
             // Who else is asking to speak right now — the host's queue, oldest request first.
             'raised_hands' => $room->activeMembers()
                 ->whereNotNull('hand_raised_at')
-                ->with('user.profile:id,user_id,display_name,avatar_url')
+                ->with('user.profile:id,user_id,display_name,avatar_url,gender')
                 ->orderBy('hand_raised_at')
                 ->get()
                 ->map(fn (RoomMember $m) => SocialPresenter::user($m->user))
@@ -227,6 +239,8 @@ class RoomController extends Controller
                 'muted'         => $mySeat?->is_self_muted ?? false,
                 'camera_on'     => $mySeat?->is_camera_on ?? false,
                 'can_take_seat' => ! $room->isClosed() && ! $room->isBlockedForUser($viewer->id),
+                'follows_owner' => $room->owner_id !== null
+                    && Follow::query()->where('follower_id', $viewer->id)->where('following_id', $room->owner_id)->exists(),
             ],
             // No Agora/RTC token block — audio is peer-to-peer WebRTC, signalled entirely
             // over the `room.{uuid}` presence channel this state call tells the client to

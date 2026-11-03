@@ -54,6 +54,7 @@ use App\Http\Controllers\Api\NotificationController as ApiNotificationController
 use App\Http\Controllers\Api\PostCommentController;
 use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\ProgressionController;
+use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\RankingController as ApiRankingController;
 use App\Http\Controllers\Api\RechargeController;
 use App\Http\Controllers\Api\RoomCatalogueController as ApiRoomCatalogueController;
@@ -208,6 +209,9 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::post('messages/delivered', [ConversationController::class, 'deliveredAll'])->name('messages.delivered');
     Route::post('conversations/{conversation}/delivered', [ConversationController::class, 'delivered'])->name('conversations.delivered');
     Route::post('conversations/{conversation}/mute', [ConversationController::class, 'mute'])->name('conversations.mute');
+    Route::post('conversations/{conversation}/pin', [ConversationController::class, 'pin'])->name('conversations.pin');
+    Route::post('conversations/{conversation}/alias', [ConversationController::class, 'alias'])->name('conversations.alias');
+    Route::post('conversations/{conversation}/clear', [ConversationController::class, 'clear'])->name('conversations.clear');
     Route::post('conversations/{conversation}/typing', [ConversationController::class, 'typing'])->name('conversations.typing');
     Route::post('conversations/{conversation}/leave', [ConversationController::class, 'leave'])->name('conversations.leave');
     Route::get('conversations/{conversation}/messages', [MessageController::class, 'index'])->name('conversations.messages.index');
@@ -215,6 +219,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         ->name('conversations.messages.destroy');
 
     // Sending is throttled harder than reading — docs/03 §16, "DM send 30/min/user".
+    Route::post('conversations/{conversation}/gifts', [MessageController::class, 'gift'])->name('conversations.gifts.store');
     Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])
         ->middleware('throttle:dm-send')
         ->name('conversations.messages.store');
@@ -241,6 +246,9 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::post('store/items/{item}/purchase', [ApiStoreController::class, 'purchase'])->name('store.items.purchase');
     Route::post('store/items/{item}/equip', [ApiStoreController::class, 'equip'])->name('store.items.equip');
     Route::delete('store/items/{item}/equip', [ApiStoreController::class, 'unequip'])->name('store.items.unequip');
+
+    // ---- presence
+    Route::get('presence/online-count', [PresenceController::class, 'onlineCount'])->name('presence.online_count');
 
     // ---- rankings (D.8)
     Route::get('rankings', [ApiRankingController::class, 'board'])->name('rankings.board');
@@ -303,6 +311,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         Route::get('messages', [RoomChatController::class, 'index'])->name('messages.index');
         Route::post('messages', [RoomChatController::class, 'store'])->name('messages.store');
         Route::post('casual', [RoomChatController::class, 'casual'])->name('casual');
+        Route::post('emoji', [RoomChatController::class, 'emoji'])->name('emoji');
 
         // ---- gifting within this room (D.6a)
         Route::get('gifts', [RoomGiftController::class, 'index'])->name('gifts.index');

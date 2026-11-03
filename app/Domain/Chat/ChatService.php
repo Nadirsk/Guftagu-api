@@ -64,12 +64,8 @@ class ChatService
             throw SocialException::blocked();
         }
 
-        // A DM needs a mutual follow. Checked here *and* on every send: the thread can
-        // outlive the friendship, and an unfollow has to close it rather than leave a door
-        // open for whoever opened the conversation first.
-        if (! $this->social->areFriends($actor->id, $other->id)) {
-            throw SocialException::notFriends();
-        }
+        // Anyone may message anyone who has not blocked them (or whom they have not
+        // blocked) — following back is not required.
 
         return DB::transaction(function () use ($actor, $other) {
             $existing = $this->findDirect($actor->id, $other->id);
@@ -172,10 +168,12 @@ class ChatService
             ->whereNull('left_at')
             ->with([
                 'conversation',
-                'conversation.activeParticipants.user.profile:id,user_id,display_name,avatar_url',
+                'conversation.activeParticipants.user.profile:id,user_id,display_name,avatar_url,gender',
             ])
             ->join('conversations', 'conversations.id', '=', 'conversation_participants.conversation_id')
             ->where('conversations.is_active', true)
+            ->orderByDesc('conversation_participants.is_pinned')
+            ->orderByDesc('conversation_participants.pinned_at')
             ->orderByDesc('conversations.last_message_at')
             ->orderByDesc('conversations.id')
             ->select('conversation_participants.*')
@@ -205,7 +203,7 @@ class ChatService
 
         return Message::query()
             ->whereIn('id', $ids)
-            ->with(['sender.profile:id,user_id,display_name,avatar_url', 'replyTo:id,uuid'])
+            ->with(['sender.profile:id,user_id,display_name,avatar_url,gender', 'replyTo:id,uuid'])
             ->get()
             ->keyBy('conversation_id')
             ->all();
@@ -230,19 +228,13 @@ class ChatService
             ->where('user_id', '!=', $sender->id)
             ->get();
 
-        // D.9c, plus the mutual-follow rule. On a direct thread either one closes it
-        // outright; in a group a block only removes that person from the fan-out, since one
-        // block should not silence the room.
+        // D.9c. On a direct thread a block in either direction closes it outright; in a
+        // group a block only removes that person from the fan-out, since one block should
+        // not silence the room.
         if ($conversation->type === Conversation::DIRECT) {
             foreach ($recipients as $recipient) {
                 if (Block::existsBetween($sender->id, $recipient->user_id)) {
                     throw SocialException::blocked();
-                }
-
-                // Re-checked on every send, not just when the thread was opened: an
-                // unfollow has to stop the conversation, and the thread already exists.
-                if (! $this->social->areFriends($sender->id, $recipient->user_id)) {
-                    throw SocialException::notFriends();
                 }
             }
         } else {
@@ -255,7 +247,10 @@ class ChatService
         $type = $data['type'] ?? Message::TEXT;
         $mediaUrl = $data['media_url'] ?? null;
 
-        if ($body === '' && $mediaUrl === null) {
+        // A gift card carries everything in `media_meta`; it has no text and no file.
+        $isGift = $type === Message::GIFT && ! empty($data['media_meta']);
+
+        if ($body === '' && $mediaUrl === null && ! $isGift) {
             throw new ChatException('VALIDATION_ERROR', 'An empty message is not a message.', 422);
         }
 
@@ -344,16 +339,21 @@ class ChatService
      */
     public function messages(Conversation $conversation, User $viewer, ?int $beforeId, int $limit): array
     {
-        $this->participantOrFail($conversation, $viewer);
+        $mine = $this->participantOrFail($conversation, $viewer);
 
         $query = Message::query()
             ->where('conversation_id', $conversation->id)
-            ->with(['sender.profile:id,user_id,display_name,avatar_url', 'replyTo:id,uuid'])
+            ->with(['sender.profile:id,user_id,display_name,avatar_url,gender', 'replyTo:id,uuid'])
             // "Delete for me" — MySQL's JSON_CONTAINS over the array of user ids. The column
             // is null for the overwhelming majority of rows, hence the null guard first.
             ->where(fn ($q) => $q
                 ->whereNull('deleted_for')
                 ->orWhereRaw('NOT JSON_CONTAINS(deleted_for, ?)', [json_encode($viewer->id)]));
+
+        // "Clear Chat History" — everything up to the mark is hidden from this caller only.
+        if ($mine->cleared_before_message_id !== null) {
+            $query->where('id', '>', $mine->cleared_before_message_id);
+        }
 
         if ($beforeId !== null) {
             $query->where('id', '<', $beforeId);
@@ -576,6 +576,55 @@ class ChatService
         $mine = $this->participantOrFail($conversation, $viewer);
 
         $mine->forceFill(['is_muted' => $muted])->save();
+
+        return $mine->refresh();
+    }
+
+    /** How many threads one person can keep pinned to the top of their list. */
+    public const MAX_PINNED = 5;
+
+    /** @throws ChatException */
+    public function setPinned(Conversation $conversation, User $viewer, bool $pinned): ConversationParticipant
+    {
+        $mine = $this->participantOrFail($conversation, $viewer);
+
+        if ($pinned && ! $mine->is_pinned) {
+            $count = ConversationParticipant::where('user_id', $viewer->id)
+                ->whereNull('left_at')
+                ->where('is_pinned', true)
+                ->count();
+
+            if ($count >= self::MAX_PINNED) {
+                throw new ChatException('PIN_LIMIT', 'You can pin up to '.self::MAX_PINNED.' chats.', 422);
+            }
+        }
+
+        $mine->forceFill(['is_pinned' => $pinned, 'pinned_at' => $pinned ? now() : null])->save();
+
+        return $mine->refresh();
+    }
+
+    /** A private nickname for the other person; an empty string removes it. */
+    public function setAlias(Conversation $conversation, User $viewer, ?string $alias): ConversationParticipant
+    {
+        $mine = $this->participantOrFail($conversation, $viewer);
+
+        $alias = $alias === null ? null : trim($alias);
+
+        $mine->forceFill(['alias' => $alias === '' ? null : $alias])->save();
+
+        return $mine->refresh();
+    }
+
+    /** Hide everything sent so far from the caller. The other side's history is untouched. */
+    public function clearHistory(Conversation $conversation, User $viewer): ConversationParticipant
+    {
+        $mine = $this->participantOrFail($conversation, $viewer);
+
+        $mine->forceFill([
+            'cleared_before_message_id' => Message::where('conversation_id', $conversation->id)->max('id'),
+            'unread_count'              => 0,
+        ])->save();
 
         return $mine->refresh();
     }

@@ -26,23 +26,61 @@ class RoomGiftController extends Controller
         $data = $request->validate([
             'gift_id'  => ['required', 'integer', 'exists:gifts,id'],
             'to_user'  => ['required', 'string'],
-            'quantity' => ['sometimes', 'integer', 'min:1', 'max:99'],
+            'quantity' => ['sometimes', 'integer', 'min:1', 'max:177'],
         ]);
 
         $gift = Gift::findOrFail($data['gift_id']);
-        $receiver = User::where('uuid', $data['to_user'])->firstOrFail();
+        $quantity = (int) ($data['quantity'] ?? 1);
         $idempotencyKey = $request->header('X-Idempotency-Key');
+        $sender = $request->user();
+
+        // "all" is everyone on a mic except the sender; each gets the full quantity.
+        if ($data['to_user'] === 'all') {
+            $receivers = $room->seats()->whereNotNull('user_id')->where('user_id', '!=', $sender->id)->with('user')->get()
+                ->pluck('user')->filter()->unique('id')->values();
+
+            if ($receivers->isEmpty()) {
+                return ApiResponse::error('NO_RECEIVERS', 'Nobody is on a mic to receive that.', null, 422);
+            }
+
+            $total = $gift->coin_price * $quantity * $receivers->count();
+            if (($sender->wallet?->coin_balance ?? 0) < $total) {
+                return ApiResponse::error('INSUFFICIENT_COINS', 'Not enough coins to send to everyone.', null, 402);
+            }
+
+            $batch = (string) \Illuminate\Support\Str::uuid();
+            $last = null;
+            foreach ($receivers as $receiver) {
+                $last = $this->gifts->send(
+                    $sender, $receiver, $gift, $quantity, $room,
+                    $idempotencyKey ? "{$idempotencyKey}:{$receiver->id}" : null,
+                    $batch,
+                );
+            }
+
+            return ApiResponse::success([
+                'transaction_id' => $last[0]->id,
+                'coin_balance'   => $sender->fresh()->wallet?->coin_balance ?? 0,
+                'gift'           => ['code' => $gift->code, 'animation_url' => $gift->animation_url, 'animation_type' => $gift->animation_type, 'is_fullscreen' => $gift->is_fullscreen, 'duration_ms' => $gift->duration_ms],
+                'combo_count'    => $last[1],
+                'receiver'       => null,
+                'receivers'      => $receivers->map(fn (User $u) => SocialPresenter::user($u))->all(),
+                'all'            => true,
+            ], 'Gift sent');
+        }
+
+        $receiver = User::where('uuid', $data['to_user'])->firstOrFail();
 
         [$transaction, $comboCount] = $this->gifts->send(
-            $request->user(),
+            $sender,
             $receiver,
             $gift,
-            (int) ($data['quantity'] ?? 1),
+            $quantity,
             $room,
             $idempotencyKey,
         );
 
-        $wallet = $request->user()->fresh()->wallet;
+        $wallet = $sender->fresh()->wallet;
 
         return ApiResponse::success([
             'transaction_id' => $transaction->id,
@@ -63,7 +101,7 @@ class RoomGiftController extends Controller
     public function index(Room $room): JsonResponse
     {
         $rows = GiftTransaction::where('room_id', $room->id)
-            ->with(['sender.profile:id,user_id,display_name,avatar_url', 'receiver.profile:id,user_id,display_name,avatar_url', 'gift:id,code,thumbnail_url,tier'])
+            ->with(['sender.profile:id,user_id,display_name,avatar_url,gender', 'receiver.profile:id,user_id,display_name,avatar_url,gender', 'gift:id,code,thumbnail_url,tier'])
             ->orderByDesc('id')
             ->limit(50)
             ->get();

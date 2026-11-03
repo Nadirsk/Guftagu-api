@@ -121,12 +121,12 @@ class RoomController extends Controller
         $this->scope->guardRoomCategory($request->user(), $room->category_id, 'room');
 
         $room->load([
-            'owner.profile:id,user_id,display_name,avatar_url',
+            'owner.profile:id,user_id,display_name,avatar_url,gender',
             'category:id,key,name_en',
             'theme:id,name,is_premium',
             'seatTemplate:id,name,total_seats,vip_positions',
             'closedBy:id,name',
-            'seats.user.profile:id,user_id,display_name,avatar_url',
+            'seats.user.profile:id,user_id,display_name,avatar_url,gender',
         ]);
 
         $members = RoomMember::query()

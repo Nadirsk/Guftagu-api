@@ -11,6 +11,7 @@ use App\Support\ApiResponse;
 use App\Support\SocialPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /** GFT-222 — search over people and rooms, plus recent searches (epic D.3a). docs/03 §8. */
@@ -43,8 +44,19 @@ class SearchController extends Controller
             $this->search->remember($request->user(), $data['q']);
         }
 
+        // One query for the whole page, so the Follow button knows who is already followed.
+        $me = $request->user();
+        $followedByMe = $me === null ? [] : DB::table('follows')
+            ->where('follower_id', $me->id)
+            ->whereIn('following_id', $results['users']->pluck('id'))
+            ->pluck('following_id')
+            ->flip()
+            ->all();
+
         return ApiResponse::success([
-            'users' => $results['users']->map(fn (User $u) => SocialPresenter::user($u))->all(),
+            'users' => $results['users']->map(
+                fn (User $u) => SocialPresenter::user($u) + ['is_following' => isset($followedByMe[$u->id])]
+            )->all(),
             'rooms' => $results['rooms']->map(fn (Room $r) => [
                 'uuid'           => $r->uuid,
                 'room_code'      => $r->room_code,

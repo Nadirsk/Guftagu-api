@@ -38,6 +38,7 @@ class GiftSendService
         int $quantity = 1,
         ?Room $room = null,
         ?string $idempotencyKey = null,
+        ?string $batch = null,
     ): array {
         if ($idempotencyKey !== null) {
             $existing = GiftTransaction::where('idempotency_key', $idempotencyKey)->first();
@@ -97,7 +98,11 @@ class GiftSendService
         $combo = $this->comboCount($sender, $gift, $room, $transaction->created_at);
 
         if ($room !== null) {
-            GiftSent::dispatch($room, $transaction, $gift, $sender, $receiver, $combo);
+            try {
+                GiftSent::dispatch($room, $transaction, $gift, $sender, $receiver, $combo, $batch);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         return [$transaction, $combo];

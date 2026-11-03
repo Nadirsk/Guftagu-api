@@ -19,6 +19,7 @@ class ConversationParticipant extends Model
         'last_delivered_message_id', 'delivered_at',
         'last_read_message_id', 'read_at',
         'is_muted', 'unread_count',
+        'is_pinned', 'pinned_at', 'alias', 'cleared_before_message_id',
     ];
 
     protected function casts(): array
@@ -29,6 +30,8 @@ class ConversationParticipant extends Model
             'delivered_at' => 'datetime',
             'read_at'      => 'datetime',
             'is_muted'     => 'boolean',
+            'is_pinned'    => 'boolean',
+            'pinned_at'    => 'datetime',
             'unread_count' => 'integer',
         ];
     }

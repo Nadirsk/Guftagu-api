@@ -39,7 +39,7 @@ class MomentsTest extends MobileTestCase
     // ------------------------------------------------------------------ writing
 
     #[Test]
-    public function a_moment_can_be_posted_and_appears_in_the_authors_own_feed(): void
+    public function a_moment_can_be_posted_and_stays_out_of_the_authors_own_feeds(): void
     {
         $me = $this->actingAsUser($this->makeUser('Author'));
 
@@ -51,8 +51,9 @@ class MomentsTest extends MobileTestCase
 
         $this->assertSame(1, Post::where('user_id', $me->id)->count());
 
-        $feed = $this->getJson("{$this->base}/feed")->assertOk()->json('data');
-        $this->assertCount(1, $feed);
+        foreach (['following', 'discover'] as $scope) {
+            $this->assertCount(0, $this->getJson("{$this->base}/feed?scope={$scope}")->assertOk()->json('data'));
+        }
     }
 
     #[Test]
@@ -431,9 +432,11 @@ class MomentsTest extends MobileTestCase
     public function the_feed_pages_by_cursor_without_repeating_a_row(): void
     {
         $me = $this->actingAsUser($this->makeUser('Me'));
+        $friend = $this->makeUser('Friend');
+        $this->follow($me, $friend);
 
         foreach (range(1, 5) as $i) {
-            $this->makePost($me, Post::PUBLIC, "post-{$i}");
+            $this->makePost($friend, Post::PUBLIC, "post-{$i}");
         }
 
         $first = $this->getJson("{$this->base}/feed?limit=2")->assertOk();

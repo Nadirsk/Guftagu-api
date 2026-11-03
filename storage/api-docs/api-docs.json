@@ -10672,7 +10672,7 @@
                     "Messaging"
                 ],
                 "summary": "The DM list (D.4)",
-                "description": "OpenAPI operations for epic D.4, GFT-235/236 — App\\Http\\Controllers\\Api\\ConversationController\nand MessageController.\n\nKept separate from MobileAuthPaths.php — same reasoning as that file: **if you change a\nroute, request or response in ConversationController/MessageController, update this file in\nthe same commit.** DMs require a mutual follow (`NOT_FRIENDS`) and a block refuses either\ndirection (`BLOCKED`) — both are 403s enforced in ChatService, not middleware, since \"may I\n * message this person\" depends on the pair.",
+                "description": "OpenAPI operations for epic D.4, GFT-235/236 — App\\Http\\Controllers\\Api\\ConversationController\nand MessageController.\n\nKept separate from MobileAuthPaths.php — same reasoning as that file: **if you change a\nroute, request or response in ConversationController/MessageController, update this file in\nthe same commit.** Anyone may DM anyone, and a block refuses either\ndirection (`BLOCKED`) — both are 403s enforced in ChatService, not middleware, since \"may I\n * message this person\" depends on the pair.",
                 "operationId": "cb0e447150e6e54e6066b59c5f413a24",
                 "parameters": [
                     {
@@ -10809,7 +10809,7 @@
                         }
                     },
                     "403": {
-                        "description": "`BLOCKED` — a block exists between the parties, or `NOT_FRIENDS` — direct messaging requires a mutual follow",
+                        "description": "`BLOCKED` — a block exists between the parties",
                         "content": {
                             "application/json": {
                                 "schema": {

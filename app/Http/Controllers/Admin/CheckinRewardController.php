@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\CheckinReward;
+use App\Models\StoreItem;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Epic D.7c — the admin side of the 7-day check-in ladder. Always exactly 7 rows (one per
@@ -18,7 +20,7 @@ class CheckinRewardController extends Controller
 {
     public function index(): JsonResponse
     {
-        $rewards = CheckinReward::query()->orderBy('streak_day')->get();
+        $rewards = CheckinReward::query()->with('storeItem')->orderBy('streak_day')->get();
 
         return ApiResponse::success($rewards->map(fn (CheckinReward $r) => $this->payload($r)));
     }
@@ -38,7 +40,7 @@ class CheckinRewardController extends Controller
             );
         }
 
-        $reward = CheckinReward::create($data);
+        $reward = CheckinReward::create($data)->load('storeItem');
 
         return ApiResponse::success($this->payload($reward), 'Reward saved', 201);
     }
@@ -49,7 +51,7 @@ class CheckinRewardController extends Controller
 
         $checkinReward->update($data);
 
-        return ApiResponse::success($this->payload($checkinReward->fresh()), 'Reward updated');
+        return ApiResponse::success($this->payload($checkinReward->fresh('storeItem')), 'Reward updated');
     }
 
     public function destroy(CheckinReward $checkinReward): JsonResponse
@@ -61,16 +63,35 @@ class CheckinRewardController extends Controller
 
     protected function validated(Request $request, ?CheckinReward $ignoring = null): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'streak_day'   => [
                 'required', 'integer', 'between:1,7',
                 Rule::unique('checkin_rewards', 'streak_day')->ignore($ignoring),
             ],
-            'reward_type'  => ['required', 'string', Rule::in(CheckinReward::TYPES)],
-            'reward_value' => ['required', 'integer', 'min:1'],
+            'reward_type'  => ['required', 'string', Rule::in(CheckinReward::types())],
+            'reward_value' => ['required_if:reward_type,coins,diamonds', 'nullable', 'integer', 'min:1'],
+            'store_item_id' => ['required_if:reward_type,'.implode(',', StoreItem::TYPES), 'nullable', 'integer', 'exists:store_items,id'],
+            'duration_days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3650'],
             'icon_url'     => ['sometimes', 'nullable', 'url', 'max:500'],
             'is_active'    => ['sometimes', 'boolean'],
         ]);
+
+        if (CheckinReward::isItemType($data['reward_type'])) {
+            $item = StoreItem::find($data['store_item_id']);
+
+            if ($item === null || $item->type !== $data['reward_type']) {
+                throw ValidationException::withMessages([
+                    'store_item_id' => ['Pick an item of the chosen type.'],
+                ]);
+            }
+
+            $data['reward_value'] = 1;
+        } else {
+            $data['store_item_id'] = null;
+            $data['duration_days'] = null;
+        }
+
+        return $data;
     }
 
     protected function payload(CheckinReward $reward): array
@@ -80,9 +101,12 @@ class CheckinRewardController extends Controller
             'streak_day'   => $reward->streak_day,
             'reward_type'  => $reward->reward_type,
             'reward_value' => $reward->reward_value,
+            'store_item_id' => $reward->store_item_id,
+            'duration_days' => $reward->duration_days,
+            'item'         => $reward->itemPayload(),
             'icon_url'     => $reward->icon_url,
             'is_active'    => $reward->is_active,
-            'payable'      => in_array($reward->reward_type, CheckinReward::TYPES, true),
+            'payable'      => $reward->isPayable(),
         ];
     }
 }

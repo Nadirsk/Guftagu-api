@@ -9,6 +9,7 @@ use App\Models\RankingReward;
 use App\Models\RankingRewardPayout;
 use App\Models\RankingRule;
 use App\Models\User;
+use App\Models\UserProfile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -60,6 +61,7 @@ class LeaderboardService
                 'users.guftagu_id',
                 'user_profiles.display_name',
                 'user_profiles.avatar_url',
+                'user_profiles.gender',
                 DB::raw("{$column} AS score"),
             ])
             ->values()
@@ -69,7 +71,7 @@ class LeaderboardService
                 'score'        => (int) $row->score,
                 'guftagu_id'   => $row->guftagu_id,
                 'display_name' => $row->display_name,
-                'avatar_url'   => $row->avatar_url,
+                'avatar_url'   => $row->avatar_url ?: UserProfile::defaultAvatarUrl($row->gender, $row->entity_id),
             ]);
     }
 

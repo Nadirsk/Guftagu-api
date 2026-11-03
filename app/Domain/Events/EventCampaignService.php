@@ -16,6 +16,7 @@ use App\Models\RankingRule;
 use App\Models\RewardCatalogItem;
 use App\Models\StoreItem;
 use App\Models\User;
+use App\Models\UserProfile;
 use App\Models\VipTier;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -144,7 +145,7 @@ class EventCampaignService
         $profiles = DB::table('users')
             ->join('user_profiles', 'user_profiles.user_id', '=', 'users.id')
             ->whereIn('users.id', $rows->pluck('user_id'))
-            ->get(['users.id', 'users.guftagu_id', 'user_profiles.display_name', 'user_profiles.avatar_url'])
+            ->get(['users.id', 'users.guftagu_id', 'user_profiles.display_name', 'user_profiles.avatar_url', 'user_profiles.gender'])
             ->keyBy('id');
 
         return $rows->values()->map(function ($row, $index) use ($profiles) {
@@ -156,7 +157,7 @@ class EventCampaignService
                 'score'        => (int) $row->score,
                 'guftagu_id'   => $profile->guftagu_id ?? null,
                 'display_name' => $profile->display_name ?? null,
-                'avatar_url'   => $profile->avatar_url ?? null,
+                'avatar_url'   => ($profile->avatar_url ?? null) ?: UserProfile::defaultAvatarUrl($profile->gender ?? null, $row->user_id),
             ];
         });
     }

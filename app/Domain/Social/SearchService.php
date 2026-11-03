@@ -55,7 +55,7 @@ class SearchService
         $query = User::query()
             ->search($term)
             ->where('status', '!=', User::STATUS_DELETED)
-            ->with('profile:id,user_id,display_name,avatar_url');
+            ->with('profile:id,user_id,display_name,avatar_url,gender');
 
         if ($viewer !== null) {
             $query->whereKeyNot($viewer->id);
@@ -76,7 +76,7 @@ class SearchService
             ->where(fn ($q) => $q
                 ->where('name', 'like', "%{$term}%")
                 ->orWhere('room_code', $term))
-            ->with(['owner.profile:id,user_id,display_name,avatar_url', 'category:id,name_en'])
+            ->with(['owner.profile:id,user_id,display_name,avatar_url,gender', 'category:id,name_en'])
             // Live rooms above idle ones, then by how busy they are — the ordering the
             // `(status, listener_count)` index in docs/02 §14 exists for.
             ->orderByRaw("CASE WHEN status = ? THEN 0 ELSE 1 END", [Room::LIVE])

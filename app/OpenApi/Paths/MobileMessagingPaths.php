@@ -10,7 +10,7 @@ use OpenApi\Attributes as OA;
  *
  * Kept separate from MobileAuthPaths.php — same reasoning as that file: **if you change a
  * route, request or response in ConversationController/MessageController, update this file in
- * the same commit.** DMs require a mutual follow (`NOT_FRIENDS`) and a block refuses either
+ * the same commit.** Anyone may DM anyone, and a block refuses either
  * direction (`BLOCKED`) — both are 403s enforced in ChatService, not middleware, since "may I
  * message this person" depends on the pair.
  */
@@ -60,7 +60,7 @@ use OpenApi\Attributes as OA;
                 new OA\Property(property: 'meta', ref: '#/components/schemas/Meta'),
             ])
         ),
-        new OA\Response(response: 403, description: '`BLOCKED` — a block exists between the parties, or `NOT_FRIENDS` — direct messaging requires a mutual follow', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 403, description: '`BLOCKED` — a block exists between the parties', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
         new OA\Response(response: 422, description: '`VALIDATION_ERROR` — e.g. starting a conversation with yourself, or a group with no other member', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]

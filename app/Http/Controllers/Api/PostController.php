@@ -12,6 +12,7 @@ use App\Support\Cursor;
 use App\Support\SocialPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -88,8 +89,16 @@ class PostController extends Controller
     {
         $post = $this->posts->show($post, $request->user());
 
+        $me = $request->user();
+
         return ApiResponse::success([
-            'post' => SocialPresenter::post($post, $this->likedByCaller($request, $post)),
+            'post' => SocialPresenter::post($post, $this->likedByCaller($request, $post)) + [
+                // Lets the detail screen decide Follow vs nothing no matter where it was opened from.
+                'author_is_following' => $me !== null && DB::table('follows')
+                    ->where('follower_id', $me->id)
+                    ->where('following_id', $post->user_id)
+                    ->exists(),
+            ],
         ]);
     }
 

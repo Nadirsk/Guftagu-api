@@ -2,6 +2,7 @@
 
 namespace App\Domain\Engagement;
 
+use App\Domain\Store\InventoryService;
 use App\Domain\Wallet\WalletService;
 use App\Models\CheckinReward;
 use App\Models\DailyCheckin;
@@ -22,7 +23,7 @@ use Illuminate\Support\Facades\DB;
  */
 class CheckinService
 {
-    public function __construct(protected WalletService $wallet)
+    public function __construct(protected WalletService $wallet, protected InventoryService $inventory)
     {
     }
 
@@ -32,7 +33,7 @@ class CheckinService
     public function status(User $user): array
     {
         $resolved = $this->resolveToday($user);
-        $catalogue = CheckinReward::query()->where('is_active', true)->get()->keyBy('streak_day');
+        $catalogue = CheckinReward::query()->with('storeItem')->where('is_active', true)->get()->keyBy('streak_day');
 
         $week = [];
 
@@ -52,7 +53,9 @@ class CheckinService
                 'reward_type'  => $slot?->reward_type,
                 'reward_value' => $slot?->reward_value,
                 'icon_url'     => $slot?->icon_url,
-                'payable'      => $slot !== null && in_array($slot->reward_type, CheckinReward::TYPES, true),
+                'duration_days' => $slot?->duration_days,
+                'item'         => $slot?->itemPayload(),
+                'payable'      => $slot !== null && $slot->isPayable(),
                 'status'       => $status,
             ];
         }
@@ -78,9 +81,10 @@ class CheckinService
         $slot = CheckinReward::query()
             ->where('streak_day', $resolved['streak_day'])
             ->where('is_active', true)
+            ->with('storeItem')
             ->first();
 
-        if ($slot === null) {
+        if ($slot === null || ! $slot->isPayable()) {
             return ['ok' => false, 'error' => 'not_configured'];
         }
 
@@ -94,9 +98,13 @@ class CheckinService
                     'streak_day'   => $resolved['streak_day'],
                     'reward_type'  => $slot->reward_type,
                     'reward_value' => $slot->reward_value,
+                    'store_item_id' => $slot->store_item_id,
+                    'duration_days' => $slot->duration_days,
                 ]);
 
-                if (in_array($slot->reward_type, CheckinReward::TYPES, true)) {
+                if (CheckinReward::isItemType($slot->reward_type)) {
+                    $this->inventory->grantStoreItem($user, $slot->storeItem, $slot->duration_days, 'checkin');
+                } else {
                     $currency = $slot->reward_type === 'diamonds' ? Wallet::DIAMOND : Wallet::COIN;
 
                     $this->wallet->creditSystem(

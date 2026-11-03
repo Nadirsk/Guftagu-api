@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Engagement\CheckinService;
 use App\Http\Controllers\Controller;
+use App\Models\StoreItem;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -46,6 +47,10 @@ class CheckinController extends Controller
             'streak_day'   => $checkin->streak_day,
             'reward_type'  => $checkin->reward_type,
             'reward_value' => $checkin->reward_value,
+            'duration_days' => $checkin->duration_days,
+            'item'         => $checkin->store_item_id === null ? null : StoreItem::find($checkin->store_item_id)?->only(
+                ['id', 'type', 'name', 'image_url', 'animation_url'],
+            ),
         ], 'Reward claimed');
     }
 }

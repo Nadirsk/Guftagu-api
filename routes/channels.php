@@ -56,8 +56,8 @@ Broadcast::channel('post.{uuid}', function ($user, string $uuid) {
 });
 
 /**
- * A chat thread. Participants only, never across a block (D.9c), and on a direct thread only
- * while the two still follow each other — the same gate `ChatService::send()` applies.
+ * A chat thread. Participants only, and never across a block (D.9c) — the same gate
+ * `ChatService::send()` applies.
  *
  * The socket has to enforce it too. A thread that refuses new messages but keeps streaming
  * them over the WebSocket is not closed, it is closed in one direction.
@@ -86,8 +86,7 @@ Broadcast::channel('conversation.{uuid}', function ($user, string $uuid) {
         return true;
     }
 
-    return ! Block::existsBetween($user->id, $otherId)
-        && app(SocialService::class)->areFriends($user->id, $otherId);
+    return ! Block::existsBetween($user->id, $otherId);
 });
 
 /**

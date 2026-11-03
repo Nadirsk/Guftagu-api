@@ -36,6 +36,12 @@ return [
         // APP_ENV=local. See OtpService::nextOtp.
         'static_otp' => env('USER_OTP_STATIC_OTP'),
 
+        // Fixed-code test accounts, "phone:code" pairs separated by commas. Unlike
+        // static_otp above this is honoured in EVERY environment, live included, and
+        // only for the listed numbers; the SMS still goes out, carrying the fixed code. Set the env var
+        // to an empty string to switch it off.
+        'static_numbers' => env('USER_OTP_STATIC_NUMBERS', '9326431979:123456'),
+
         'ttl_minutes' => 5,
         'max_attempts' => 5,
 

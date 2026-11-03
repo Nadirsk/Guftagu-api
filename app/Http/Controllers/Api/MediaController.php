@@ -37,6 +37,9 @@ class MediaController extends Controller
 
     public const VIDEO_MIMES = 'mp4,mov,m4v,webm,3gp';
 
+    /** Voice notes: what a phone's recorder produces (AAC in an m4a/mp4/3gp container) and the common others. */
+    public const AUDIO_MIMES = 'm4a,aac,mp3,wav,ogg,oga,opus,amr';
+
     public function __construct(protected ImageUploadService $uploads)
     {
     }
@@ -47,11 +50,11 @@ class MediaController extends Controller
         $request->validate([
             'file' => [
                 'required', 'file', 'max:'.self::MAX_KB,
-                'mimes:'.self::IMAGE_MIMES.','.self::VIDEO_MIMES,
+                'mimes:'.self::IMAGE_MIMES.','.self::VIDEO_MIMES.','.self::AUDIO_MIMES,
             ],
         ], [
             'file.max'   => 'That file is larger than '.(self::MAX_KB / 1024).' MB.',
-            'file.mimes' => 'Only images and videos can be attached to a moment.',
+            'file.mimes' => 'Only images, videos and voice notes can be uploaded.',
         ]);
 
         $file = $request->file('file');
@@ -62,9 +65,10 @@ class MediaController extends Controller
         // media type rather than the filename: a streamed upload sends whatever
         // the picker's cache file happened to be called, which on some devices
         // carries no extension at all.
-        $result['kind'] = str_starts_with((string) $file->getMimeType(), 'video/')
+        $mime = (string) $file->getMimeType();
+        $result['kind'] = str_starts_with($mime, 'video/')
             ? 'video'
-            : 'image';
+            : (str_starts_with($mime, 'audio/') ? 'audio' : 'image');
 
         return ApiResponse::success($result, 'Uploaded');
     }

@@ -48,7 +48,19 @@ class OpenApiDocumentTest extends TestCase
      * as more mobile paths are added here on purpose — it is not meant to eventually cover
      * the whole mobile surface.
      */
-    protected const DOCUMENTED_MOBILE_PREFIXES = ['api/v1/auth/', 'api/v1/checkin'];
+    protected const DOCUMENTED_MOBILE_PREFIXES = [
+        'api/v1/auth/',
+        'api/v1/checkin',
+        // Social, moments, search and chat (epics D.3, D.4, D.9c).
+        'api/v1/conversations',
+        'api/v1/messages/',
+        'api/v1/feed',
+        'api/v1/posts',
+        'api/v1/search',
+        'api/v1/friends',
+        'api/v1/blocks',
+        'api/v1/users/',
+    ];
 
     /** @return array<string, true> */
     protected function documentedMobileRoutes(): array

@@ -156,6 +156,8 @@ class SocialPresenter
             'last_message_at' => $conversation->last_message_at?->toIso8601ZuluString(),
             'unread_count'    => (int) ($mine?->unread_count ?? 0),
             'is_muted'        => (bool) ($mine?->is_muted ?? false),
+            'is_pinned'       => (bool) ($mine?->is_pinned ?? false),
+            'alias'           => $mine?->alias,
         ];
     }
 }

@@ -193,6 +193,7 @@ class PostService
         }
 
         $parentId = null;
+        $parent = null;
 
         if ($parentUuid !== null) {
             // A reply has to belong to the same post, and replies are one level deep — a
@@ -288,7 +289,7 @@ class PostService
     public function feed(?User $viewer, string $scope, ?int $afterId, int $limit, ?User $profile = null): array
     {
         $query = Post::query()
-            ->with(['author.profile:id,user_id,display_name,avatar_url'])
+            ->with(['author.profile:id,user_id,display_name,avatar_url,gender'])
             ->visibleTo($viewer);
 
         // The Moment tab is "people I have not followed yet", so it is not the
@@ -305,13 +306,13 @@ class PostService
         }
 
         if ($scope === 'following' && $viewer !== null) {
-            $query->where(fn ($q) => $q
-                ->where('posts.user_id', $viewer->id)
-                ->orWhereExists(fn ($sub) => $sub
+            // Own moments are in neither tab; they live on the profile.
+            $query->where('posts.user_id', '!=', $viewer->id)
+                ->whereExists(fn ($sub) => $sub
                     ->selectRaw('1')
                     ->from('follows')
                     ->whereColumn('follows.following_id', 'posts.user_id')
-                    ->where('follows.follower_id', $viewer->id)));
+                    ->where('follows.follower_id', $viewer->id));
         }
 
         if ($scope === 'user' && $profile !== null) {
@@ -343,7 +344,7 @@ class PostService
             throw SocialException::notVisible();
         }
 
-        return $post->load(['author.profile:id,user_id,display_name,avatar_url']);
+        return $post->load(['author.profile:id,user_id,display_name,avatar_url,gender']);
     }
 
     /**
@@ -357,7 +358,7 @@ class PostService
 
         $query = PostComment::query()
             ->where('post_id', $post->id)
-            ->with(['author.profile:id,user_id,display_name,avatar_url']);
+            ->with(['author.profile:id,user_id,display_name,avatar_url,gender']);
 
         if ($viewer !== null) {
             // A blocked person's comments disappear from the thread in both directions —
@@ -402,7 +403,7 @@ class PostService
 
         $query = PostLike::query()
             ->where('post_id', $post->id)
-            ->with(['user.profile:id,user_id,display_name,avatar_url']);
+            ->with(['user.profile:id,user_id,display_name,avatar_url,gender']);
 
         if ($viewer !== null) {
             $query->whereNotExists(fn ($sub) => $sub

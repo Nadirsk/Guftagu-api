@@ -125,7 +125,7 @@ class SocialService
     {
         $relation = $direction === 'followers' ? $profile->followers() : $profile->following();
 
-        $relation->with('profile:id,user_id,display_name,avatar_url')
+        $relation->with('profile:id,user_id,display_name,avatar_url,gender')
             ->where('users.status', '!=', User::STATUS_DELETED);
 
         if ($viewer !== null) {
@@ -157,7 +157,7 @@ class SocialService
     {
         $query = User::query()
             ->where('status', '!=', User::STATUS_DELETED)
-            ->with('profile:id,user_id,display_name,avatar_url')
+            ->with('profile:id,user_id,display_name,avatar_url,gender')
             ->whereIn('id', $this->mutualFollowIds($user->id));
 
         return $this->excludeBlocked($query, $user->id)
@@ -247,7 +247,7 @@ class SocialService
     {
         return Block::query()
             ->where('blocker_id', $user->id)
-            ->with(['blocked.profile:id,user_id,display_name,avatar_url'])
+            ->with(['blocked.profile:id,user_id,display_name,avatar_url,gender'])
             ->latest('id')
             ->paginate(perPage: $perPage, page: $page);
     }
@@ -293,7 +293,7 @@ class SocialService
     {
         return UserVisit::query()
             ->where('profile_id', $profileOwner->id)
-            ->with(['visitor.profile:id,user_id,display_name,avatar_url'])
+            ->with(['visitor.profile:id,user_id,display_name,avatar_url,gender'])
             ->orderByDesc('visited_at')
             ->paginate(perPage: $perPage, page: $page);
     }

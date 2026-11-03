@@ -11,7 +11,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class DailyCheckin extends Model
 {
-    protected $fillable = ['user_id', 'checkin_date', 'streak_day', 'reward_type', 'reward_value'];
+    protected $fillable = [
+        'user_id', 'checkin_date', 'streak_day', 'reward_type', 'reward_value', 'store_item_id', 'duration_days',
+    ];
 
     protected function casts(): array
     {

@@ -223,51 +223,33 @@ class ChatTest extends MobileTestCase
             ->json('data.0.reply_to'));
     }
 
-    // ------------------------------------------------------- mutual-follow gate
+    // ------------------------------------------------------- open DMs
 
     #[Test]
-    public function you_cannot_start_a_dm_with_someone_who_is_not_a_friend(): void
+    public function you_can_start_a_dm_with_someone_who_is_not_a_friend(): void
     {
         $a = $this->makeUser('A');
         $b = $this->makeUser('B');
 
         $this->actingAsUser($a);
 
-        // Strangers.
-        $this->postJson("{$this->base}/conversations", ['user_uuid' => $b->uuid])
-            ->assertStatus(403)
-            ->assertJsonPath('error.code', 'NOT_FRIENDS');
-
-        // One-way follow is still not enough — they have to follow back.
-        $this->follow($a, $b);
-        $this->postJson("{$this->base}/conversations", ['user_uuid' => $b->uuid])
-            ->assertStatus(403)
-            ->assertJsonPath('error.code', 'NOT_FRIENDS');
-
-        $this->follow($b, $a);
+        // Following back is not required; only a block closes a thread.
         $this->postJson("{$this->base}/conversations", ['user_uuid' => $b->uuid])->assertStatus(201);
     }
 
     #[Test]
-    public function unfollowing_closes_an_existing_thread_to_new_messages(): void
+    public function unfollowing_does_not_close_an_existing_thread(): void
     {
         [$a, $b, $uuid] = $this->directThread();
 
-        $this->postJson("{$this->base}/conversations/{$uuid}/messages", ['body' => 'while friends'])
-            ->assertStatus(201);
-
-        // The thread already exists, so the gate has to be on send too, not only on create.
         $this->deleteJson("{$this->base}/users/{$b->uuid}/follow")->assertOk();
 
-        $this->postJson("{$this->base}/conversations/{$uuid}/messages", ['body' => 'after'])
-            ->assertStatus(403)
-            ->assertJsonPath('error.code', 'NOT_FRIENDS');
+        $this->postJson("{$this->base}/conversations/{$uuid}/messages", ['body' => 'still here'])
+            ->assertStatus(201);
 
-        // And from the other side, who never unfollowed anyone.
         $this->actingAsUser($b);
-        $this->postJson("{$this->base}/conversations/{$uuid}/messages", ['body' => 'hello?'])
-            ->assertStatus(403)
-            ->assertJsonPath('error.code', 'NOT_FRIENDS');
+        $this->postJson("{$this->base}/conversations/{$uuid}/messages", ['body' => 'hello'])
+            ->assertStatus(201);
     }
 
     #[Test]

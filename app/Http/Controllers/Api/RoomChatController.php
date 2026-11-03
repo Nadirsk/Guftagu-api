@@ -83,6 +83,36 @@ class RoomChatController extends Controller
             report($e);
         }
 
+        // The chat keeps only the outcome, as Mazag does: a framed tile with the dice face / the three digits.
+        $this->chat->post($room, $user, '[casual:'.$data['type'].':'.implode(',', $result).']');
+
         return ApiResponse::success(['type' => $data['type'], 'result' => $result]);
+    }
+
+    /**
+     * POST /rooms/{room}/emoji — `{id}`: an animated emoji. It plays over the sender's seat for
+     * everyone and also lands in the chat as a sticker row. Shares the casual games' 2 s cooldown.
+     */
+    public function emoji(Request $request, Room $room): JsonResponse
+    {
+        $data = $request->validate(['id' => ['required', 'integer', 'between:1,104']]);
+        $user = $request->user();
+
+        if (! $room->activeMembers()->where('user_id', $user->id)->exists()) {
+            return ApiResponse::error('not_in_room', 'Join the room first', null, 403);
+        }
+        if (! Cache::add("casual:{$room->id}:{$user->id}", 1, 2)) {
+            return ApiResponse::error('too_fast', 'Slow down a little', null, 429);
+        }
+
+        try {
+            CasualPlayed::dispatch($room, $user, 'emoji', [(int) $data['id']]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        $this->chat->post($room, $user, '[emoji:'.(int) $data['id'].']');
+
+        return ApiResponse::success(['id' => (int) $data['id']]);
     }
 }

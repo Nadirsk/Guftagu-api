@@ -67,7 +67,7 @@ class UserController extends Controller
             // kyc columns are table-qualified: the relation uses latestOfMany(), which
             // joins a subquery, and an unqualified `user_id` is then ambiguous.
             ->with([
-                'profile:id,user_id,display_name,avatar_url,country',
+                'profile:id,user_id,display_name,avatar_url,gender,country',
                 'wallet',
                 'kyc:user_kyc.id,user_kyc.user_id,user_kyc.status',
                 // Feeds effective_status without an EXISTS query per row.

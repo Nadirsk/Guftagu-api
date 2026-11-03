@@ -24,6 +24,7 @@ class GiftSent implements ShouldBroadcastNow
         public User $sender,
         public User $receiver,
         public int $comboCount,
+        public ?string $batch = null,
     ) {
     }
 
@@ -47,6 +48,7 @@ class GiftSent implements ShouldBroadcastNow
             'receiver'       => SocialPresenter::user($this->receiver),
             'gift'           => [
                 'code'           => $this->gift->code,
+                'thumbnail_url'  => $this->gift->thumbnail_url,
                 'animation_url'  => $this->gift->animation_url,
                 'animation_type' => $this->gift->animation_type,
                 'is_fullscreen'  => $this->gift->is_fullscreen,
@@ -54,6 +56,8 @@ class GiftSent implements ShouldBroadcastNow
             ],
             'quantity'    => $this->transaction->quantity,
             'combo_count' => $this->comboCount,
+            'batch'       => $this->batch,
+            'coin_value'  => $this->transaction->coin_value,
         ];
     }
 }

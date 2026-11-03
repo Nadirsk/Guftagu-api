@@ -39,6 +39,12 @@ class ConversationController extends Controller
         return ApiResponse::success(
             $rows->map(function (ConversationParticipant $mine) use ($me, $lastMessages) {
                 $conversation = $mine->conversation;
+                $lastMessage  = $lastMessages[$conversation->id] ?? null;
+
+                // Cleared threads show no preview until something new is said.
+                if ($lastMessage !== null && $lastMessage->id <= (int) $mine->cleared_before_message_id) {
+                    $lastMessage = null;
+                }
 
                 $others = $conversation->activeParticipants
                     ->reject(fn (ConversationParticipant $p) => $p->user_id === $me->id)
@@ -50,7 +56,7 @@ class ConversationController extends Controller
                 return SocialPresenter::conversation(
                     $conversation,
                     $mine,
-                    $lastMessages[$conversation->id] ?? null,
+                    $lastMessage,
                     $others,
                 );
             })->all()
@@ -164,6 +170,38 @@ class ConversationController extends Controller
         return ApiResponse::success(['is_muted' => (bool) $mine->is_muted], 'Updated');
     }
 
+    /** POST /conversations/{uuid}/pin */
+    public function pin(Request $request, Conversation $conversation): JsonResponse
+    {
+        $data = $request->validate(['pinned' => ['sometimes', 'boolean']]);
+
+        $mine = $this->chat->setPinned(
+            $conversation,
+            $request->user(),
+            $request->has('pinned') ? (bool) $data['pinned'] : true,
+        );
+
+        return ApiResponse::success(['is_pinned' => (bool) $mine->is_pinned], 'Updated');
+    }
+
+    /** POST /conversations/{uuid}/alias */
+    public function alias(Request $request, Conversation $conversation): JsonResponse
+    {
+        $data = $request->validate(['alias' => ['present', 'nullable', 'string', 'max:50']]);
+
+        $mine = $this->chat->setAlias($conversation, $request->user(), $data['alias']);
+
+        return ApiResponse::success(['alias' => $mine->alias], 'Updated');
+    }
+
+    /** POST /conversations/{uuid}/clear */
+    public function clear(Request $request, Conversation $conversation): JsonResponse
+    {
+        $this->chat->clearHistory($conversation, $request->user());
+
+        return ApiResponse::success(null, 'Chat history cleared');
+    }
+
     /**
      * POST /conversations/{uuid}/typing
      *
@@ -195,7 +233,7 @@ class ConversationController extends Controller
 
     protected function present(Conversation $conversation, User $me): array
     {
-        $conversation->load('activeParticipants.user.profile:id,user_id,display_name,avatar_url');
+        $conversation->load('activeParticipants.user.profile:id,user_id,display_name,avatar_url,gender');
 
         $mine = $conversation->activeParticipants
             ->firstWhere('user_id', $me->id);
@@ -208,6 +246,10 @@ class ConversationController extends Controller
             ->all();
 
         $last = $this->chat->lastMessages([$conversation->id])[$conversation->id] ?? null;
+
+        if ($last !== null && $last->id <= (int) $mine?->cleared_before_message_id) {
+            $last = null;
+        }
 
         return SocialPresenter::conversation($conversation, $mine, $last, $others);
     }
