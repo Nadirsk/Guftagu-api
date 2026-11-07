@@ -2,12 +2,15 @@
 
 namespace App\Support;
 
+use App\Domain\Store\InventoryService;
 use App\Models\Conversation;
 use App\Models\ConversationParticipant;
 use App\Models\Message;
 use App\Models\Post;
 use App\Models\PostComment;
+use App\Models\StoreItem;
 use App\Models\User;
+use App\Models\UserStoreItem;
 
 /**
  * One shape per entity, used by **both** the REST controllers and the broadcast events.
@@ -31,6 +34,7 @@ class SocialPresenter
         }
 
         $profile = $user->relationLoaded('profile') ? $user->profile : $user->profile()->first();
+        $wallet = $user->relationLoaded('wallet') ? $user->wallet : $user->wallet()->first();
 
         return [
             'uuid'         => $user->uuid,
@@ -40,7 +44,52 @@ class SocialPresenter
             // The moments feed prints "04:23:22 - India" under each post
             // (Figma 25:451), so the author's country travels with them.
             'country'      => $profile?->country,
+            // The Visitors list (Figma 525:3923) pins a male / female badge on each avatar.
+            'gender'       => $profile?->gender,
+            // The wealth and charm grade medals next to the name (room chat, moments …).
+            'wealth_level' => $wallet?->levelNumber('wealth') ?? 0,
+            'charm_level'  => $wallet?->levelNumber('charm') ?? 0,
+            // The frame they wear from the Item Bag, drawn around their photo everywhere;
+            // null once they take it off.
+            'frame'        => static::frame($user),
+            // The rest of what they wear that other people see in a room: chat bubble, voice
+            // wave around the seat, profile card, floating-screen banner. Null when nothing.
+            'cosmetics'    => static::cosmetics($user),
         ];
+    }
+
+    /** Worn items other than the frame, keyed by store type; null when none are worn. */
+    public static function cosmetics(User $user): ?array
+    {
+        $worn = UserStoreItem::query()
+            ->where('user_id', $user->id)
+            ->whereNotNull('equipped_at')
+            ->active()
+            ->whereHas('storeItem', fn ($q) => $q->where('is_active', true)->whereIn('type', [
+                StoreItem::TYPE_BUBBLE,
+                StoreItem::TYPE_MIC_WAVE,
+                StoreItem::TYPE_PROFILE_CARD,
+                StoreItem::TYPE_FLOATING_SCREEN,
+            ]))
+            ->with('storeItem')
+            ->orderBy('equipped_at')
+            ->get();
+
+        $out = [];
+        foreach ($worn as $row) {
+            $item = $row->storeItem;
+            $out[$item->type] = ['name' => $item->name] + InventoryService::framePayload($item);
+        }
+
+        return $out === [] ? null : $out;
+    }
+
+    /** The worn frame, as `InventoryService::framePayload()` shapes it. */
+    public static function frame(User $user): ?array
+    {
+        $worn = $user->relationLoaded('wornFrame') ? $user->wornFrame : $user->wornFrame()->with('storeItem')->first();
+
+        return InventoryService::framePayload($worn?->storeItem);
     }
 
     /**

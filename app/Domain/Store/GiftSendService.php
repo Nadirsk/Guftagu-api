@@ -83,6 +83,13 @@ class GiftSendService
             $this->wallets->debitSystem($sender, Wallet::COIN, $coinValue, 'gift_send', $idempotencyKey);
             $this->wallets->creditSystem($receiver, Wallet::DIAMOND, $diamondValue, 'gift_receive', $idempotencyKey);
 
+            // Wealth and charm levels count room gifts only, by coin value — the sender's
+            // wealth and the receiver's charm move by the same amount.
+            if ($room !== null) {
+                Wallet::query()->where('user_id', $sender->id)->increment('lifetime_gift_coins_sent', $coinValue);
+                Wallet::query()->where('user_id', $receiver->id)->increment('lifetime_gift_coins_received', $coinValue);
+            }
+
             return GiftTransaction::create([
                 'sender_id'        => $sender->id,
                 'receiver_id'      => $receiver->id,

@@ -201,8 +201,13 @@ class RoomController extends Controller
                 'video_enabled'   => $room->video_enabled,
                 'announcement'    => $room->announcement,
                 'theme'           => $room->theme === null ? null : ['background_url' => $room->theme->background_url],
+                // Which Room Mode / Room Theme card the host's sheets show as current.
+                'seat_template_id' => $room->seat_template_id,
+                'theme_id'        => $room->theme_id,
                 // The host's own upload wins over the theme's picture.
                 'background_url'  => $room->background_url ?? $room->theme?->background_url,
+                // The same picture the Party list shows for this room, so the header matches it.
+                'cover_url'       => $room->cover_url ?? $room->background_url ?? $room->theme?->background_url,
             ],
             'owner' => $room->owner === null ? null : SocialPresenter::user($room->owner),
             // The four newest arrivals, for the avatar row beside the listener count (45:2631).

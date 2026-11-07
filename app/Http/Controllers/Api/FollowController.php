@@ -89,7 +89,11 @@ class FollowController extends Controller
                 ->all();
 
         return ApiResponse::paginated($paginator, collect($paginator->items())->map(
-            fn (User $u) => SocialPresenter::user($u) + ['is_following' => isset($followedByMe[$u->id])]
+            fn (User $u) => SocialPresenter::user($u) + [
+                'is_following' => isset($followedByMe[$u->id]),
+                // When the follow happened — the Followers / Following lists print it per row.
+                'followed_at'  => $u->pivot?->created_at?->toIso8601ZuluString(),
+            ]
         )->all());
     }
 }

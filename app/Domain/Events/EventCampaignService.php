@@ -9,6 +9,7 @@ use App\Models\Badge;
 use App\Models\Event;
 use App\Models\EventClaim;
 use App\Models\EventProgress;
+use App\Models\EventRound;
 use App\Models\EventTier;
 use App\Models\EventTierReward;
 use App\Models\LeaderboardSnapshot;
@@ -65,12 +66,114 @@ class EventCampaignService
     {
         $now = ($at ?? now())->copy();
 
+        if ($periodType === 'weekly' && $event->isGiftWeeklyStar()) {
+            return $this->roundFor($event, $now);
+        }
+
         return match ($periodType) {
             'daily'   => [$now->copy()->startOfDay(), $now->copy()->endOfDay()],
             'weekly'  => [$now->copy()->startOfWeek(), $now->copy()->endOfWeek()],
             'monthly' => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()],
             default   => [$event->starts_at->copy(), $event->ends_at->copy()],
         };
+    }
+
+    /**
+     * A Weekly Star round: 7 days counted from the campaign's own start, so a campaign
+     * starting on a Wednesday closes its rounds on Tuesday nights. Before the start it is
+     * the first round; the window is inclusive of its last second (whereBetween).
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    public function roundFor(Event $event, ?Carbon $at = null): array
+    {
+        $seconds = $event->starts_at->diffInSeconds(($at ?? now()), false);
+        $index = max(0, (int) floor($seconds / (Event::ROUND_DAYS * 86400)));
+
+        $start = $event->starts_at->copy()->addDays(Event::ROUND_DAYS * $index);
+
+        return [$start, $start->copy()->addDays(Event::ROUND_DAYS)->subSecond()];
+    }
+
+    /**
+     * Every round of a Weekly Star campaign, in order — the last one is cut short if
+     * the campaign's end does not fall on a round boundary.
+     *
+     * @return array<int, array{0: Carbon, 1: Carbon}>
+     */
+    public function roundsOf(Event $event): array
+    {
+        $rounds = [];
+        $start = $event->starts_at->copy();
+
+        while ($start->lt($event->ends_at)) {
+            $end = $start->copy()->addDays(Event::ROUND_DAYS)->subSecond();
+            $rounds[] = [$start->copy(), $end->min($event->ends_at)];
+            $start->addDays(Event::ROUND_DAYS);
+        }
+
+        return $rounds;
+    }
+
+    /**
+     * Close a finished Weekly Star round: rank it, pay its Top 3 (or whatever rank bands
+     * the tiers cover) and record the result. Safe to call again — claims are unique per
+     * (tier, user, round), so a re-run only pays anyone a previous run missed.
+     */
+    public function settleRound(Event $event, Carbon $roundStart, ?AdminUser $actor = null): EventRound
+    {
+        [$start, $end] = $this->roundFor($event, $roundStart);
+
+        if ($end->isFuture()) {
+            throw new EventException('BAD_REQUEST', 'This round has not finished yet.', 400, ['ends_at' => $end->toIso8601ZuluString()]);
+        }
+
+        $deepest = (int) $event->tiers()->where('tier_type', EventTier::RANK_RANGE)->max('rank_to');
+        $standings = $this->windowedBoard($event, max(3, $deepest), $start);
+
+        $result = $this->distributeTiers($event, $actor, $start);
+
+        $round = EventRound::firstOrNew(['event_id' => $event->id, 'period_start' => $start]);
+        $round->fill([
+            'period_end' => $end,
+            'standings'  => $standings->map(fn (array $row) => [
+                'rank'         => $row['rank'],
+                'user_id'      => $row['entity_id'],
+                'guftagu_id'   => $row['guftagu_id'],
+                'display_name' => $row['display_name'],
+                'score'        => $row['score'],
+            ])->all(),
+            'granted'    => $round->granted + $result['granted'],
+            'settled_at' => now(),
+            'settled_by' => $actor?->id,
+        ])->save();
+
+        return $round;
+    }
+
+    /**
+     * Rounds that have finished but were never settled — what the scheduled job pays.
+     *
+     * @return array<int, Carbon>
+     */
+    public function dueRounds(Event $event): array
+    {
+        $settled = $event->rounds()->pluck('period_start')
+            ->map(fn ($at) => Carbon::parse($at)->toDateTimeString())->all();
+
+        $due = [];
+
+        foreach ($this->roundsOf($event) as [$start, $end]) {
+            if ($end->isFuture()) {
+                break;
+            }
+
+            if (! in_array($start->toDateTimeString(), $settled, true)) {
+                $due[] = $start;
+            }
+        }
+
+        return $due;
     }
 
     /**
@@ -130,9 +233,9 @@ class EventCampaignService
      *
      * @return Collection<int, array<string, mixed>>
      */
-    public function windowedBoard(Event $event, int $limit = 100): Collection
+    public function windowedBoard(Event $event, int $limit = 100, ?Carbon $at = null): Collection
     {
-        [$start, $end] = $this->periodFor($event, $event->period);
+        [$start, $end] = $this->periodFor($event, $event->period, $at);
 
         $query = $this->metricQuery($event);
 
@@ -228,7 +331,7 @@ class EventCampaignService
      *
      * @return array{eligible: int, granted: int, skipped: int}
      */
-    public function distributeTiers(Event $event, AdminUser $actor, ?Carbon $periodStart = null): array
+    public function distributeTiers(Event $event, ?AdminUser $actor, ?Carbon $periodStart = null): array
     {
         $tiers = $event->tiers()->where('tier_type', EventTier::RANK_RANGE)->get();
 
@@ -244,7 +347,8 @@ class EventCampaignService
             }
 
             [$start, $end] = $this->periodFor($event, $event->period, $periodStart);
-            $standings = $this->windowedBoard($event);
+            // Ranked for the period being paid, not whichever one is running now.
+            $standings = $this->windowedBoard($event, 100, $start);
             $periodType = $event->period ?? self::FIXED;
         }
 
@@ -383,6 +487,11 @@ class EventCampaignService
             $query->whereBetween('created_at', [$start, $end]);
         }
 
+        // Weekly Star scores only its Event Gifts — none chosen means nothing scores.
+        if ($event->isGiftWeeklyStar()) {
+            return $query->whereIn('gift_id', $event->gifts()->pluck('gifts.id'));
+        }
+
         if ($event->metric_ref_id !== null) {
             $column = $event->metric_ref_type === 'gift_category' ? 'gift_category_id' : 'gift_id';
             $query->where($column, $event->metric_ref_id);
@@ -515,6 +624,7 @@ class EventCampaignService
             'id'               => $catalog->id,
             'name'             => $catalog->name,
             'icon_url'         => $catalog->icon_url,
+            'image_url'        => $catalog->imageUrl(),
             'description'      => $catalog->description,
             'handler_key'      => $catalog->handler_key,
             'handler_ref_id'   => $catalog->handler_ref_id,

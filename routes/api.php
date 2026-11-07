@@ -34,10 +34,12 @@ use App\Http\Controllers\Admin\TranslateController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\UserWalletController;
 use App\Http\Controllers\Admin\VipTierController;
+use App\Http\Controllers\Admin\WeeklyStarController;
 use App\Http\Controllers\Admin\WithdrawalController;
 use App\Http\Controllers\Api\AgencyController as ApiAgencyController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BadgeController;
+use App\Http\Controllers\Api\PageController;
 use App\Http\Controllers\Api\BlockController;
 use App\Http\Controllers\Api\CheckinController;
 use App\Http\Controllers\Api\ConversationController;
@@ -50,6 +52,7 @@ use App\Http\Controllers\Api\GiftController as ApiGiftController;
 use App\Http\Controllers\Api\HostController as ApiHostController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\MediaController;
+use App\Http\Controllers\Api\ReportController as ApiReportController;
 use App\Http\Controllers\Api\NotificationController as ApiNotificationController;
 use App\Http\Controllers\Api\PostCommentController;
 use App\Http\Controllers\Api\PostController;
@@ -123,6 +126,9 @@ Route::prefix('v1')->name('app.auth.')->group(function () {
     // Local-only test affordance — see App\Http\Controllers\Api\DevAuthController. Mirrors
     // Admin\DevHelperController's pattern: registered inside the environment check rather
     // than behind a permission, so outside local the route does not exist at all.
+    // Settings → About Us / Privacy Policy / Terms of use — readable before signing in.
+    Route::get('pages/{type}', [PageController::class, 'show'])->middleware('throttle:60,1')->name('pages.show');
+
     if (app()->environment('local')) {
         Route::get('dev/login-as/{user}', [DevAuthController::class, 'loginAs'])->name('dev.login-as');
     }
@@ -160,6 +166,9 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     // ---- moments (D.3d)
     // `media_urls` on a post stores URLs; this is where a picked file becomes one.
     Route::post('media', [MediaController::class, 'store'])->name('media.store');
+
+    // ---- reporting a user from the app; lands in the Moderator queue (A.5b, C.3)
+    Route::post('reports', [ApiReportController::class, 'store'])->middleware('throttle:10,1')->name('reports.store');
     Route::get('feed', [PostController::class, 'feed'])->name('feed');
     Route::post('posts', [PostController::class, 'store'])->name('posts.store');
     Route::get('posts/{post}', [PostController::class, 'show'])->name('posts.show');
@@ -231,6 +240,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::get('wallet/coins/transactions', [ApiWalletController::class, 'coinTransactions'])->name('wallet.coins.transactions');
     Route::get('wallet/diamonds/transactions', [ApiWalletController::class, 'diamondTransactions'])->name('wallet.diamonds.transactions');
     Route::get('recharge-packages', [RechargeController::class, 'packages'])->name('recharge-packages.index');
+    Route::post('recharge-packages/{package}/purchase', [RechargeController::class, 'purchase'])->name('recharge-packages.purchase');
     Route::get('withdrawals/config', [ApiWithdrawalController::class, 'config'])->name('withdrawals.config');
     Route::get('withdrawals', [ApiWithdrawalController::class, 'index'])->name('withdrawals.index');
     Route::post('withdrawals', [ApiWithdrawalController::class, 'store'])->name('withdrawals.store');
@@ -244,6 +254,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::get('store/items', [ApiStoreController::class, 'index'])->name('store.items.index');
     Route::get('store/items/mine', [ApiStoreController::class, 'mine'])->name('store.items.mine');
     Route::post('store/items/{item}/purchase', [ApiStoreController::class, 'purchase'])->name('store.items.purchase');
+    Route::post('store/items/{item}/send', [ApiStoreController::class, 'send'])->name('store.items.send');
     Route::post('store/items/{item}/equip', [ApiStoreController::class, 'equip'])->name('store.items.equip');
     Route::delete('store/items/{item}/equip', [ApiStoreController::class, 'unequip'])->name('store.items.unequip');
 
@@ -253,6 +264,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     // ---- rankings (D.8)
     Route::get('rankings', [ApiRankingController::class, 'board'])->name('rankings.board');
     Route::get('rankings/me', [ApiRankingController::class, 'me'])->name('rankings.me');
+    Route::get('rankings/rewards', [ApiRankingController::class, 'rewards'])->name('rankings.rewards');
 
     // ---- agency & host application (D.9a/b)
     Route::get('agencies', [ApiHostController::class, 'agencies'])->name('agencies.index');
@@ -279,6 +291,8 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
 
     // ---- create a room (D.2a). Not nested under {room:uuid} — there isn't one yet.
     Route::post('rooms', [RoomHostController::class, 'store'])->name('rooms.store');
+    // The caller's own room, if they have one — Party → Create My Room goes straight in.
+    Route::get('rooms/mine', [RoomHostController::class, 'mine'])->name('rooms.mine');
 
     // ---- other live rooms, for the in-room drawer and the Live tab. Ahead of the
     // {room:uuid} group so "live" is never read as a room uuid.
@@ -306,6 +320,9 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         Route::post('members/{profile}/kick', [RoomHostController::class, 'kickMember'])->name('members.kick');
         Route::patch('seats/{seat}/lock', [RoomHostController::class, 'lockSeat'])->name('seats.lock');
         Route::patch('announcement', [RoomHostController::class, 'setAnnouncement'])->name('announcement');
+        // Room Mode (seats re-laid, everyone stood up) and Room Theme (background only).
+        Route::patch('mode', [RoomHostController::class, 'changeMode'])->name('mode');
+        Route::patch('theme', [RoomHostController::class, 'changeTheme'])->name('theme');
 
         // ---- in-room chat (D.2d)
         Route::get('messages', [RoomChatController::class, 'index'])->name('messages.index');
@@ -658,6 +675,19 @@ Route::prefix('v1')->group(function () {
 
             Route::get('events/{event}/manual-fulfillments', [EventController::class, 'manualFulfillments'])
                 ->middleware('permission:events.view')->name('events.manual_fulfillments.index');
+
+            // ---- Weekly Star: gift-scored 7-day rounds, Top 3 paid automatically
+            Route::get('weekly-stars/{event}', [WeeklyStarController::class, 'show'])
+                ->middleware('permission:events.view')->name('weekly-stars.show');
+            Route::middleware('permission:events.manage')->group(function () {
+                Route::post('weekly-stars', [WeeklyStarController::class, 'store'])->name('weekly-stars.store');
+                Route::patch('weekly-stars/{event}', [WeeklyStarController::class, 'update'])->name('weekly-stars.update');
+                Route::put('weekly-stars/{event}/gifts', [WeeklyStarController::class, 'syncGifts'])->name('weekly-stars.gifts');
+            });
+            Route::middleware('permission:events.reward_manage')->group(function () {
+                Route::post('weekly-stars/{event}/tiers/{tier}/rewards', [WeeklyStarController::class, 'addReward'])->name('weekly-stars.rewards.store');
+                Route::post('weekly-stars/{event}/settle', [WeeklyStarController::class, 'settle'])->name('weekly-stars.settle');
+            });
 
             // ---- reward catalog — the admin-manageable list every event's tier bundles draw from
             Route::get('reward-catalog', [RewardCatalogController::class, 'index'])

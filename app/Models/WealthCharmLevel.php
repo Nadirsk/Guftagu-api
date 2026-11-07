@@ -52,6 +52,20 @@ class WealthCharmLevel extends Model
             ->first();
     }
 
+    /**
+     * Just the level number for a lifetime total — 0 below the first threshold. For the
+     * person card on every post, chat line and seat, so the active ladder is read once per
+     * request rather than once per card.
+     */
+    public static function numberFor(string $type, int $lifetimeValue): int
+    {
+        $ladder = once(fn () => static::query()->active()->orderBy('threshold')
+            ->get(['type', 'level', 'threshold'])->groupBy('type')->all());
+
+        return (int) collect($ladder[$type] ?? [])
+            ->last(fn (self $l) => $l->threshold <= $lifetimeValue)?->level;
+    }
+
     /** The next level up, so the panel/app can show "3,400 coins to Wealth 6". */
     public static function nextAfter(string $type, int $lifetimeValue): ?self
     {

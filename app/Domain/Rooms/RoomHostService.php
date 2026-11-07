@@ -2,15 +2,19 @@
 
 namespace App\Domain\Rooms;
 
+use App\Domain\Store\InventoryService;
 use App\Events\Rooms\MemberRoleChanged;
 use App\Events\Rooms\RoomAnnouncementUpdated;
 use App\Events\Rooms\SeatLockToggled;
 use App\Events\Rooms\SeatOccupied;
 use App\Events\Rooms\SeatOwnerMuteToggled;
 use App\Events\Rooms\SeatVacated;
+use App\Events\Rooms\RoomUpdated;
 use App\Models\Room;
 use App\Models\RoomMember;
 use App\Models\RoomSeat;
+use App\Models\RoomSeatTemplate;
+use App\Models\RoomTheme;
 use App\Models\User;
 use App\Models\UserSanction;
 use Illuminate\Support\Facades\DB;
@@ -141,6 +145,77 @@ class RoomHostService
         SeatOwnerMuteToggled::dispatch($room, $seat);
 
         return $seat;
+    }
+
+    /**
+     * Room Mode (Figma 774:7201): switch the room to another seat template. The seats are
+     * laid out afresh, so everybody seated — the host too — is stood up; nobody leaves the
+     * room. Choosing the mode already in use changes nothing.
+     *
+     * @throws RoomException
+     */
+    public function changeMode(Room $room, User $actor, int $templateId): Room
+    {
+        $this->assertIsHost($room, $actor);
+
+        $template = RoomSeatTemplate::where('id', $templateId)->where('is_active', true)->first();
+        if ($template === null) {
+            throw new RoomException('NOT_FOUND', 'That room mode does not exist.', 404);
+        }
+
+        if ($room->seat_template_id === $template->id) {
+            return $room;
+        }
+
+        $seated = $room->seats()->whereNotNull('user_id')->with('user')->get();
+        $vip = $template->vip_positions ?? [];
+
+        DB::transaction(function () use ($room, $template, $vip) {
+            $room->seats()->delete();
+            for ($i = 1; $i <= $template->total_seats; $i++) {
+                RoomSeat::create(['room_id' => $room->id, 'seat_number' => $i, 'is_vip' => in_array($i, $vip, true)]);
+            }
+            $room->forceFill(['seat_template_id' => $template->id, 'seat_count' => $template->total_seats])->save();
+        });
+
+        // Each person stood up hears it like any other vacated seat (their mic stops), then
+        // everyone re-reads the new layout.
+        foreach ($seated as $seat) {
+            SeatVacated::dispatch($room, $seat->seat_number, $seat->user);
+        }
+        RoomUpdated::dispatch($room->fresh('theme'), RoomUpdated::MODE);
+
+        return $room->fresh();
+    }
+
+    /**
+     * Room Theme (Figma 774:8130): a theme from the catalogue, or the host's own picture
+     * (the "+" card). Only the background changes — seats and people stay as they are.
+     *
+     * @throws RoomException
+     */
+    public function changeTheme(Room $room, User $actor, ?int $themeId, ?string $backgroundUrl): Room
+    {
+        $this->assertIsHost($room, $actor);
+
+        if ($backgroundUrl !== null) {
+            // The host's own upload wins over any theme picture; the theme stays as it was.
+            $room->forceFill(['background_url' => $backgroundUrl])->save();
+        } else {
+            $theme = RoomTheme::where('id', $themeId)->where('is_active', true)->first();
+            if ($theme === null) {
+                throw new RoomException('NOT_FOUND', 'That room theme does not exist.', 404);
+            }
+            if ($theme->required_vip_tier_id !== null && ! app(InventoryService::class)->meetsTier($actor, $theme->required_vip_tier_id)) {
+                throw new RoomException('FORBIDDEN', 'Your VIP tier is not high enough for this theme.', 403);
+            }
+            // Picking a theme drops an earlier upload, or the upload would keep hiding it.
+            $room->forceFill(['theme_id' => $theme->id, 'background_url' => null])->save();
+        }
+
+        RoomUpdated::dispatch($room->fresh('theme'), RoomUpdated::THEME);
+
+        return $room->fresh();
     }
 
     /** Frees the seat without banning the occupant from the room — see {@see RoomModerationService::kick} for that. */

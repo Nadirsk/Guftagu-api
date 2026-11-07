@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Gift;
 use App\Models\GiftTransaction;
 use App\Models\Room;
+use App\Models\RoomMember;
 use App\Models\User;
 use App\Support\ApiResponse;
 use App\Support\SocialPresenter;
@@ -98,9 +99,22 @@ class RoomGiftController extends Controller
     }
 
     /** GET /rooms/{room}/gifts — the recent feed, newest first. */
-    public function index(Room $room): JsonResponse
+    public function index(Request $request, Room $room): JsonResponse
     {
+        // Same rule as the chat: only gifts sent since this person's current arrival. Someone
+        // who is not inside the room sees none.
+        $joinedAt = RoomMember::query()
+            ->where('room_id', $room->id)
+            ->where('user_id', $request->user()->id)
+            ->where('is_active', true)
+            ->value('joined_at');
+
+        if ($joinedAt === null) {
+            return ApiResponse::success([]);
+        }
+
         $rows = GiftTransaction::where('room_id', $room->id)
+            ->where('created_at', '>=', $joinedAt)
             ->with(['sender.profile:id,user_id,display_name,avatar_url,gender', 'receiver.profile:id,user_id,display_name,avatar_url,gender', 'gift:id,code,thumbnail_url,tier'])
             ->orderByDesc('id')
             ->limit(50)

@@ -9,11 +9,13 @@ use App\Models\LeaderboardSnapshot;
 use App\Models\RankingReward;
 use App\Models\RankingRewardPayout;
 use App\Models\RankingRule;
+use App\Models\StoreItem;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule as ValidationRule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * GFT-096 / GFT-098 / GFT-101 — ranking rules, boards and reward payouts (A.9c, A.9d).
@@ -30,7 +32,9 @@ class RankingController extends Controller
     {
         $rules = RankingRule::query()
             ->when(! $request->boolean('include_inactive'), fn ($q) => $q->where('is_active', true))
-            ->orderBy('board_type')->orderBy('period')
+            ->orderBy('board_type')
+            // Shortest period first (daily → weekly → monthly → all_time), not alphabetical.
+            ->orderByRaw("CASE period WHEN 'daily' THEN 1 WHEN 'weekly' THEN 2 WHEN 'monthly' THEN 3 ELSE 4 END")
             ->get();
 
         return ApiResponse::success([
@@ -166,91 +170,55 @@ class RankingController extends Controller
     public function rewards(RankingRule $rule): JsonResponse
     {
         $rewards = RankingReward::query()
+            ->with('storeItem')
             ->where('rule_key', $rule->key)
             ->orderBy('rank_from')
+            ->orderBy('id')
             ->get();
 
         return ApiResponse::success($rewards->map(fn (RankingReward $r) => [
-            'id'           => $r->id,
-            'rank_from'    => $r->rank_from,
-            'rank_to'      => $r->rank_to,
-            'reward_type'  => $r->reward_type,
-            'reward_value' => $r->reward_value,
-            'is_active'    => $r->is_active,
+            'id'            => $r->id,
+            'rank_from'     => $r->rank_from,
+            'rank_to'       => $r->rank_to,
+            'reward_type'   => $r->reward_type,
+            'reward_value'  => $r->reward_value,
+            'store_item_id' => $r->store_item_id,
+            'duration_days' => $r->duration_days,
+            'item'          => $r->itemPayload(),
+            'is_active'     => $r->is_active,
+            'payable'       => $r->isPayable(),
         ])->all());
     }
 
     public function addReward(Request $request, RankingRule $rule): JsonResponse
     {
-        $data = $request->validate([
-            'rank_from'    => ['required', 'integer', 'min:1'],
-            'rank_to'      => ['required', 'integer', 'gte:rank_from'],
-            'reward_type'  => ['required', ValidationRule::in(['coins', 'diamonds'])],
-            'reward_value' => ['required', 'integer', 'min:1', 'max:100000000'],
-        ]);
+        $data = $this->validateReward($request);
 
-        $clash = RankingReward::query()
-            ->where('rule_key', $rule->key)
-            ->where('is_active', true)
-            ->where('rank_from', '<=', $data['rank_to'])
-            ->where('rank_to', '>=', $data['rank_from'])
-            ->first();
-
-        if ($clash !== null) {
-            return ApiResponse::error(
-                'VALIDATION_ERROR',
-                'That rank range overlaps an existing reward band.',
-                ['overlapping' => ['rank_from' => $clash->rank_from, 'rank_to' => $clash->rank_to]],
-                422,
-            );
+        if ($full = $this->fullRank($rule, $data['rank_from'], $data['rank_to'])) {
+            return $full;
         }
 
         $reward = RankingReward::create([...$data, 'rule_key' => $rule->key]);
 
-        return ApiResponse::success(['id' => $reward->id], 'Reward band added', 201);
+        return ApiResponse::success(['id' => $reward->id], 'Reward added', 201);
     }
 
     /**
-     * Bands carry no capacity/claimed counter (unlike event rewards) — a payout copies
-     * `reward_type`/`reward_value` onto its own row at the moment it pays, so editing or
-     * removing a band afterwards cannot retouch a payout that already happened.
+     * Rewards carry no capacity/claimed counter (unlike event rewards) — a payout copies
+     * the reward onto its own row at the moment it pays, so editing or removing one
+     * afterwards cannot retouch a payout that already happened.
      */
     public function updateReward(Request $request, RankingRule $rule, RankingReward $reward): JsonResponse
     {
-        $data = $request->validate([
-            'rank_from'    => ['sometimes', 'integer', 'min:1'],
-            'rank_to'      => ['sometimes', 'integer', 'gte:rank_from'],
-            'reward_type'  => ['sometimes', ValidationRule::in(['coins', 'diamonds'])],
-            'reward_value' => ['sometimes', 'integer', 'min:1', 'max:100000000'],
-        ]);
+        $data = $this->validateReward($request);
 
-        $rankFrom = $data['rank_from'] ?? $reward->rank_from;
-        $rankTo = $data['rank_to'] ?? $reward->rank_to;
-
-        if ($rankTo < $rankFrom) {
-            return ApiResponse::error('VALIDATION_ERROR', 'The rank range is inverted.', null, 422);
-        }
-
-        $clash = RankingReward::query()
-            ->where('rule_key', $rule->key)
-            ->where('is_active', true)
-            ->where('id', '!=', $reward->id)
-            ->where('rank_from', '<=', $rankTo)
-            ->where('rank_to', '>=', $rankFrom)
-            ->first();
-
-        if ($clash !== null) {
-            return ApiResponse::error(
-                'VALIDATION_ERROR',
-                'That rank range overlaps an existing reward band.',
-                ['overlapping' => ['rank_from' => $clash->rank_from, 'rank_to' => $clash->rank_to]],
-                422,
-            );
+        if ($full = $this->fullRank($rule, $data['rank_from'], $data['rank_to'], $reward)) {
+            return $full;
         }
 
         $reward->fill($data)->save();
 
-        return ApiResponse::success(null, 'Reward band updated');
+        return ApiResponse::success(null, 'Reward updated');
     }
 
     public function removeReward(RankingRule $rule, RankingReward $reward): JsonResponse
@@ -261,6 +229,69 @@ class RankingController extends Controller
     }
 
     // ----------------------------------------------------------------- shared
+
+    /** Same shape as a check-in day: currency with an amount, or a store item for N days. */
+    protected function validateReward(Request $request): array
+    {
+        $data = $request->validate([
+            'rank_from'     => ['required', 'integer', 'min:1'],
+            'rank_to'       => ['required', 'integer', 'gte:rank_from'],
+            'reward_type'   => ['required', 'string', ValidationRule::in(RankingReward::types())],
+            'reward_value'  => ['required_if:reward_type,coins,diamonds', 'nullable', 'integer', 'min:1', 'max:100000000'],
+            'store_item_id' => ['required_if:reward_type,'.implode(',', StoreItem::TYPES), 'nullable', 'integer', 'exists:store_items,id'],
+            'duration_days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3650'],
+            'is_active'     => ['sometimes', 'boolean'],
+        ]);
+
+        if (RankingReward::isItemType($data['reward_type'])) {
+            $item = StoreItem::find($data['store_item_id']);
+
+            if ($item === null || $item->type !== $data['reward_type']) {
+                throw ValidationException::withMessages([
+                    'store_item_id' => ['Pick an item of the chosen type.'],
+                ]);
+            }
+
+            $data['reward_value'] = 1;
+            $data['duration_days'] ??= null;
+        } else {
+            $data['store_item_id'] = null;
+            $data['duration_days'] = null;
+        }
+
+        return $data;
+    }
+
+    /**
+     * The app's Weekly List card has three slots, so no rank may carry more than
+     * MAX_PER_RANK active rewards. The busiest rank inside [from, to] is always the
+     * range start or the start of an existing reward that begins inside it.
+     */
+    protected function fullRank(RankingRule $rule, int $from, int $to, ?RankingReward $ignoring = null): ?JsonResponse
+    {
+        $others = RankingReward::query()
+            ->where('rule_key', $rule->key)
+            ->where('is_active', true)
+            ->when($ignoring, fn ($q) => $q->where('id', '!=', $ignoring->id))
+            ->where('rank_from', '<=', $to)
+            ->where('rank_to', '>=', $from)
+            ->get();
+
+        $ranks = $others->pluck('rank_from')->filter(fn (int $r) => $r > $from)->push($from)->unique();
+
+        foreach ($ranks as $rank) {
+            if ($others->filter(fn (RankingReward $r) => $r->covers($rank))->count() >= RankingReward::MAX_PER_RANK) {
+                return ApiResponse::error(
+                    'VALIDATION_ERROR',
+                    sprintf('Rank %d already has %d rewards — that is the most one rank can carry.', $rank, RankingReward::MAX_PER_RANK),
+                    ['full_rank' => $rank],
+                    422,
+                );
+            }
+        }
+
+        return null;
+    }
 
     /** @return array<string, mixed> */
     protected function validateRule(Request $request, bool $creating = true, ?RankingRule $rule = null): array

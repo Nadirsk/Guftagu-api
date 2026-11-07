@@ -55,6 +55,33 @@ class RewardCatalogItem extends Model
         };
     }
 
+    /**
+     * The picture the app shows on a reward tile: the admin's own icon if one was set,
+     * otherwise the image of the thing actually granted (the frame itself, the medal,
+     * the VIP badge). Null for coins/diamonds/manual — the app has bundled art for those.
+     */
+    public function imageUrl(): ?string
+    {
+        if ($this->icon_url) {
+            return $this->icon_url;
+        }
+
+        $model = $this->refModel();
+
+        if ($model === null || $this->handler_ref_id === null) {
+            return null;
+        }
+
+        $ref = $model::find($this->handler_ref_id);
+
+        return match (true) {
+            $ref instanceof StoreItem => $ref->image_url,
+            $ref instanceof Badge => $ref->icon_url,
+            $ref instanceof VipTier => $ref->badge_url,
+            default => null,
+        };
+    }
+
     /** A human-readable name for whatever handler_ref_id points at, for admin display. */
     public function refLabel(): ?string
     {

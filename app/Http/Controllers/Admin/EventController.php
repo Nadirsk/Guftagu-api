@@ -165,6 +165,15 @@ class EventController extends Controller
             return ApiResponse::error('BAD_REQUEST', 'That event would already be over.', null, 400);
         }
 
+        if ($event->type === Event::WEEKLY_STAR && ($clash = $event->clashingWeeklyStar()) !== null) {
+            return ApiResponse::error(
+                'VALIDATION_ERROR',
+                "Another Weekly Star (“{$clash->title_en}”) is already published for overlapping dates — only one runs at a time.",
+                ['clashing_event_id' => $clash->id],
+                422,
+            );
+        }
+
         $event->forceFill(['status' => Event::SCHEDULED, 'approved_by' => $request->user()->id])->save();
 
         $this->audit->log($request->user(), 'event.publish', 'events', Event::class, $event->id, ['status' => Event::DRAFT], ['status' => Event::SCHEDULED]);

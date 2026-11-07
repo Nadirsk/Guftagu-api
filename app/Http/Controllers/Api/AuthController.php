@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\UserBadge;
 use App\Models\UserStoreItem;
 use App\Support\ApiResponse;
+use App\Support\SocialPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -343,6 +344,10 @@ class AuthController extends Controller
 
         $data = $request->validate([
             'display_name'        => ['sometimes', 'string', 'max:50'],
+            // Settings → Account → Birthdate; the same 18+ rule as sign-up.
+            'date_of_birth'       => ['sometimes', 'date', 'before_or_equal:'.now()->subYears(18)->toDateString()],
+            // Settings → Account → Gender; the same choices as sign-up.
+            'gender'              => ['sometimes', 'string', Rule::in(['male', 'female', 'undisclosed'])],
             'bio'                 => ['sometimes', 'nullable', 'string', 'max:300'],
             'avatar_url'          => ['sometimes', 'nullable', 'url', 'max:500'],
             'cover_url'           => ['sometimes', 'nullable', 'url', 'max:500'],
@@ -351,6 +356,8 @@ class AuthController extends Controller
             'theme'               => ['sometimes', 'nullable', Rule::in(['light', 'dark'])],
             'privacy'             => ['sometimes', 'nullable', 'array'],
             'notification_prefs'  => ['sometimes', 'nullable', 'array'],
+        ], [
+            'date_of_birth.before_or_equal' => 'You must be at least 18 years old.',
         ]);
 
         $user->profile()->updateOrCreate([], $data);
@@ -431,6 +438,7 @@ class AuthController extends Controller
             'phone'               => $user->phone,
             'display_name'        => $profile?->display_name,
             'avatar_url'          => $profile?->avatar_url,
+            'frame'               => SocialPresenter::frame($user),
             'cover_url'           => $profile?->cover_url,
             'bio'                 => $profile?->bio,
             'gender'              => $profile?->gender,

@@ -177,6 +177,20 @@ class InventoryService
         return $owned;
     }
 
+    /** What a client needs to draw a frame around a photo. */
+    public static function framePayload(?StoreItem $item): ?array
+    {
+        if ($item === null) {
+            return null;
+        }
+
+        return [
+            'image_url'      => $item->image_url,
+            'animation_url'  => $item->animation_url,
+            'animation_type' => $item->animation_type,
+        ];
+    }
+
     /** Take an item off. Not owning it is not an error — there is nothing to take off. */
     public function unequip(User $user, StoreItem $item): void
     {
@@ -220,8 +234,9 @@ class InventoryService
         return [
             'vip'    => $tier === null ? null : ['level' => $tier->level, 'name' => $tier->name_en],
             'banner' => $banner === null ? null : [
-                'name'      => $banner->name,
-                'image_url' => $banner->image_url,
+                'name'          => $banner->name,
+                'image_url'     => $banner->image_url,
+                'animation_url' => $banner->animation_url,
             ],
             'effect' => $effect === null ? null : [
                 'name'           => $effect->name,

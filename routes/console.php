@@ -27,3 +27,7 @@ Schedule::command('moderation:expire-sanctions --quiet-on-none')->everyFifteenMi
 // freeze an incentive that is short by a day.
 Schedule::command('hosts:rollup-earnings')->dailyAt('01:00')->withoutOverlapping();
 Schedule::command('hosts:evaluate-targets --quiet-on-none')->dailyAt('01:30')->withoutOverlapping();
+
+// Weekly Star — a round closes at whatever time of day its campaign started, so this
+// checks often rather than once a day; a round with nothing due is a cheap no-op.
+Schedule::command('events:settle-weekly-star --quiet-on-none')->everyFifteenMinutes()->withoutOverlapping();

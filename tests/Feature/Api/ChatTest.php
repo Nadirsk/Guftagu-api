@@ -338,6 +338,51 @@ class ChatTest extends MobileTestCase
     }
 
     #[Test]
+    public function a_block_is_enforced_even_when_the_other_person_deleted_the_chat(): void
+    {
+        // Regression: the recipient had left the thread, so the block check never saw them
+        // and the message was stored and delivered to nobody.
+        [$a, $b, $uuid] = $this->directThread();
+
+        $this->actingAsUser($b);
+        $this->postJson("{$this->base}/conversations/{$uuid}/leave")->assertSuccessful();
+
+        $this->actingAsUser($a);
+        $this->postJson("{$this->base}/users/{$b->uuid}/block")->assertOk();
+
+        $count = Message::count();
+        $this->postJson("{$this->base}/conversations/{$uuid}/messages", ['body' => 'hello?'])
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'BLOCKED');
+        $this->assertSame($count, Message::count());
+    }
+
+    #[Test]
+    public function a_new_message_brings_back_a_chat_the_other_person_deleted(): void
+    {
+        [$a, $b, $uuid] = $this->directThread();
+
+        $this->postJson("{$this->base}/conversations/{$uuid}/messages", ['body' => 'old one'])->assertStatus(201);
+
+        $this->actingAsUser($b);
+        $this->postJson("{$this->base}/conversations/{$uuid}/leave")->assertSuccessful();
+        $this->assertCount(0, $this->getJson("{$this->base}/conversations")->assertOk()->json('data'));
+
+        $this->actingAsUser($a);
+        $this->postJson("{$this->base}/conversations/{$uuid}/messages", ['body' => 'hello again'])->assertStatus(201);
+
+        $this->actingAsUser($b);
+        $rows = $this->getJson("{$this->base}/conversations")->assertOk()->json('data');
+        $this->assertCount(1, $rows);
+        $this->assertSame('hello again', $rows[0]['last_message']['body']);
+        $this->assertSame(1, $rows[0]['unread_count']);
+
+        // Only the new message shows; what they cleared by deleting stays gone.
+        $bodies = collect($this->getJson("{$this->base}/conversations/{$uuid}/messages")->assertOk()->json('data'))->pluck('body');
+        $this->assertSame(['hello again'], $bodies->all());
+    }
+
+    #[Test]
     public function blocking_keeps_the_history(): void
     {
         [$a, $b, $uuid] = $this->directThread();

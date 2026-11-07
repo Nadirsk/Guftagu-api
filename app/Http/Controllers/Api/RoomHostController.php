@@ -25,9 +25,44 @@ class RoomHostController extends Controller
     ) {
     }
 
-    /** POST /rooms — D.2a, "creates a room, room published". */
+    /**
+     * The one room a user keeps: their newest room that moderation has not closed.
+     * Party → Create My Room opens it instead of the create screen once it exists.
+     */
+    public static function ownRoom(User $user): ?Room
+    {
+        return Room::query()
+            ->where('owner_id', $user->id)
+            ->whereNotIn('status', [Room::CLOSED, Room::FORCE_CLOSED])
+            ->latest('id')
+            ->first();
+    }
+
+    /** GET /rooms/mine — `{room: {uuid, room_code, name, cover_url, status} | null}`. */
+    public function mine(Request $request): JsonResponse
+    {
+        $room = static::ownRoom($request->user());
+
+        return ApiResponse::success(['room' => $room === null ? null : [
+            'uuid'      => $room->uuid,
+            'room_code' => $room->room_code,
+            'name'      => $room->name,
+            'cover_url' => $room->cover_url,
+            'status'    => $room->status,
+        ]]);
+    }
+
+    /**
+     * POST /rooms — D.2a, "creates a room, room published". A user keeps one room: with
+     * one already open this answers 409 ROOM_EXISTS and names it, so the app joins it.
+     */
     public function store(Request $request): JsonResponse
     {
+        $existing = static::ownRoom($request->user());
+        if ($existing !== null) {
+            return ApiResponse::error('ROOM_EXISTS', 'You already have a room.', ['uuid' => $existing->uuid], 409);
+        }
+
         $data = $request->validate([
             'name'             => ['required', 'string', 'max:80'],
             'description'      => ['sometimes', 'nullable', 'string', 'max:300'],
@@ -55,6 +90,29 @@ class RoomHostController extends Controller
             'seat_count'    => $room->seat_count,
             'video_enabled' => $room->video_enabled,
         ], 'Room published', 201);
+    }
+
+    /** PATCH /rooms/{room}/mode — `{seat_template_id}`; every seat is emptied. */
+    public function changeMode(Request $request, Room $room): JsonResponse
+    {
+        $data = $request->validate(['seat_template_id' => ['required', 'integer']]);
+
+        $this->host->changeMode($room, $request->user(), (int) $data['seat_template_id']);
+
+        return ApiResponse::success(null, 'Room mode changed');
+    }
+
+    /** PATCH /rooms/{room}/theme — `{theme_id}` or `{background_url}`; nobody moves. */
+    public function changeTheme(Request $request, Room $room): JsonResponse
+    {
+        $data = $request->validate([
+            'theme_id'       => ['required_without:background_url', 'nullable', 'integer'],
+            'background_url' => ['required_without:theme_id', 'nullable', 'url', 'max:500'],
+        ]);
+
+        $this->host->changeTheme($room, $request->user(), $data['theme_id'] ?? null, $data['background_url'] ?? null);
+
+        return ApiResponse::success(null, 'Room theme changed');
     }
 
     /** POST /rooms/{room}/members/{profile}/co-host */

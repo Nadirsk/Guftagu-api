@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-// docs/02 §8 — A.9d. Unique per (snapshot, user), which is what makes re-runs safe.
+// docs/02 §8 — A.9d. Unique per (snapshot, user, reward), which is what makes re-runs safe.
 class RankingRewardPayout extends Model
 {
     public const PENDING = 'pending';
@@ -13,8 +13,8 @@ class RankingRewardPayout extends Model
     public const FAILED = 'failed';
 
     protected $fillable = [
-        'snapshot_id', 'user_id', 'reward_type', 'reward_value',
-        'status', 'paid_at', 'transaction_id', 'error',
+        'snapshot_id', 'user_id', 'ranking_reward_id', 'reward_type', 'reward_value',
+        'store_item_id', 'duration_days', 'status', 'paid_at', 'transaction_id', 'error',
     ];
 
     protected function casts(): array

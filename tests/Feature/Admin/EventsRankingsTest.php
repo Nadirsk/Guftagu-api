@@ -15,8 +15,10 @@ use App\Models\RankingReward;
 use App\Models\RankingRewardPayout;
 use App\Models\RankingRule;
 use App\Models\Role;
+use App\Models\StoreItem;
 use App\Models\User;
 use App\Models\UserProfile;
+use App\Models\UserStoreItem;
 use App\Models\Wallet;
 use Database\Seeders\EconomySeeder;
 use Database\Seeders\PermissionSeeder;
@@ -25,6 +27,7 @@ use Database\Seeders\RoleSeeder;
 use Database\Seeders\SettingsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Laravel\Sanctum\Sanctum;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -414,6 +417,97 @@ class EventsRankingsTest extends TestCase
         $this->assertSame(3, $second['skipped']);
         $this->assertSame(3, RankingRewardPayout::count());
         $this->assertSame(5_000, Wallet::where('user_id', $winner->id)->value('coin_balance'));
+    }
+
+    #[Test]
+    public function a_rank_pays_every_reward_it_carries_including_store_items(): void
+    {
+        $rule = RankingRule::where('key', 'wealth_weekly')->first();
+        $frame = StoreItem::create(['type' => 'frame', 'name' => 'Crown', 'coin_price' => 0, 'is_active' => true]);
+
+        RankingReward::create(['rule_key' => $rule->key, 'rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'coins', 'reward_value' => 10_000]);
+        RankingReward::create([
+            'rule_key' => $rule->key, 'rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'frame',
+            'reward_value' => 1, 'store_item_id' => $frame->id, 'duration_days' => 7,
+        ]);
+
+        $winner = $this->makeUser(coinsSpent: 90_000);
+
+        $leaderboards = app(LeaderboardService::class);
+        [$start] = $leaderboards->periodFor($rule);
+        $leaderboards->snapshot($rule);
+
+        $first = $leaderboards->payRewards($rule, $start, $this->superAdmin);
+
+        $this->assertSame(2, $first['paid']);
+        $this->assertSame(10_000, Wallet::where('user_id', $winner->id)->value('coin_balance'));
+
+        $owned = UserStoreItem::where('user_id', $winner->id)->where('store_item_id', $frame->id)->first();
+        $this->assertNotNull($owned);
+        $this->assertSame('ranking', $owned->source);
+        $this->assertTrue($owned->expires_at->between(now()->addDays(7)->subMinute(), now()->addDays(7)->addMinute()));
+
+        // Both rewards are recorded, so a re-run grants neither a second time.
+        $second = $leaderboards->payRewards($rule, $start, $this->superAdmin);
+        $this->assertSame(0, $second['paid']);
+        $this->assertSame(2, $second['skipped']);
+    }
+
+    #[Test]
+    public function a_rank_carries_at_most_three_rewards(): void
+    {
+        $rule = RankingRule::where('key', 'charm_weekly')->first();
+        $frame = StoreItem::create(['type' => 'frame', 'name' => 'Crown', 'coin_price' => 0, 'is_active' => true]);
+
+        $admin = $this->actingAs($this->superAdmin, 'sanctum-admin');
+        $url = $this->base."/ranking-rules/{$rule->id}/rewards";
+
+        $admin->postJson($url, ['rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'coins', 'reward_value' => 10_000])->assertCreated();
+        $admin->postJson($url, ['rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'frame', 'store_item_id' => $frame->id, 'duration_days' => 10])->assertCreated();
+        // A band over ranks 1–3 is a third reward on rank 1.
+        $admin->postJson($url, ['rank_from' => 1, 'rank_to' => 3, 'reward_type' => 'diamonds', 'reward_value' => 500])->assertCreated();
+
+        $admin->postJson($url, ['rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'coins', 'reward_value' => 1])
+            ->assertStatus(422)
+            ->assertJsonPath('error.details.full_rank', 1);
+
+        // Rank 2 only has the 1–3 band, so it still has room.
+        $admin->postJson($url, ['rank_from' => 2, 'rank_to' => 2, 'reward_type' => 'coins', 'reward_value' => 7_000])->assertCreated();
+
+        // An item reward must name an item of its own type.
+        $admin->postJson($url, ['rank_from' => 3, 'rank_to' => 3, 'reward_type' => 'bubble', 'store_item_id' => $frame->id])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('store_item_id', 'error.details');
+    }
+
+    #[Test]
+    public function the_app_lists_the_weekly_rewards_with_their_items(): void
+    {
+        $rule = RankingRule::where('key', 'charm_weekly')->first();
+        $frame = StoreItem::create([
+            'type' => 'frame', 'name' => 'Crown', 'image_url' => 'https://cdn.test/crown.png', 'coin_price' => 0, 'is_active' => true,
+        ]);
+        $retired = StoreItem::create(['type' => 'frame', 'name' => 'Old', 'coin_price' => 0, 'is_active' => false]);
+
+        RankingReward::create(['rule_key' => $rule->key, 'rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'coins', 'reward_value' => 10_000]);
+        RankingReward::create([
+            'rule_key' => $rule->key, 'rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'frame',
+            'reward_value' => 1, 'store_item_id' => $frame->id, 'duration_days' => 10,
+        ]);
+        RankingReward::create([
+            'rule_key' => $rule->key, 'rank_from' => 2, 'rank_to' => 2, 'reward_type' => 'frame',
+            'reward_value' => 1, 'store_item_id' => $retired->id, 'duration_days' => 5,
+        ]);
+
+        Sanctum::actingAs($this->makeUser(), ['*'], 'sanctum');
+
+        $this->getJson('/api/v1/rankings/rewards?board=charm&period=weekly')
+            ->assertOk()
+            ->assertJsonCount(2, 'data.rewards')   // the switched-off item is not offered
+            ->assertJsonPath('data.rewards.0.reward_type', 'coins')
+            ->assertJsonPath('data.rewards.0.reward_value', 10_000)
+            ->assertJsonPath('data.rewards.1.duration_days', 10)
+            ->assertJsonPath('data.rewards.1.item.image_url', 'https://cdn.test/crown.png');
     }
 
     #[Test]

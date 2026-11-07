@@ -2,6 +2,7 @@
 
 namespace App\Domain\Events;
 
+use App\Domain\Store\InventoryService;
 use App\Domain\Wallet\WalletService;
 use App\Models\AdminUser;
 use App\Models\LeaderboardSnapshot;
@@ -26,7 +27,7 @@ use Illuminate\Support\Facades\DB;
  */
 class LeaderboardService
 {
-    public function __construct(protected WalletService $wallets)
+    public function __construct(protected WalletService $wallets, protected InventoryService $inventory)
     {
     }
 
@@ -138,9 +139,11 @@ class LeaderboardService
         }
 
         $rewards = RankingReward::query()
+            ->with('storeItem')
             ->where('rule_key', $rule->key)
             ->where('is_active', true)
             ->orderBy('rank_from')
+            ->orderBy('id')
             ->get();
 
         $paid = 0;
@@ -148,67 +151,70 @@ class LeaderboardService
         $totalValue = 0;
 
         foreach ($snapshots as $snapshot) {
-            $reward = $rewards->first(fn (RankingReward $r) => $r->covers($snapshot->rank));
+            // A rank can earn several rows (coins + a frame + …); each is its own payout.
+            foreach ($rewards->filter(fn (RankingReward $r) => $r->covers($snapshot->rank)) as $reward) {
+                if (RankingRewardPayout::query()
+                    ->where('snapshot_id', $snapshot->id)
+                    ->where('user_id', $snapshot->entity_id)
+                    ->where('ranking_reward_id', $reward->id)
+                    ->exists()) {
+                    $skipped++;
 
-            if ($reward === null) {
-                continue;
-            }
+                    continue;
+                }
 
-            if (RankingRewardPayout::query()
-                ->where('snapshot_id', $snapshot->id)
-                ->where('user_id', $snapshot->entity_id)
-                ->exists()) {
-                $skipped++;
+                try {
+                    DB::transaction(function () use ($snapshot, $reward, $rule, $actor, &$paid, &$totalValue) {
+                        // The claim row goes in BEFORE the money moves, so a crash between the
+                        // two leaves a `pending` record rather than an untracked payment.
+                        $payout = RankingRewardPayout::create([
+                            'snapshot_id'       => $snapshot->id,
+                            'user_id'           => $snapshot->entity_id,
+                            'ranking_reward_id' => $reward->id,
+                            'reward_type'       => $reward->reward_type,
+                            'reward_value'      => $reward->reward_value,
+                            'store_item_id'     => $reward->store_item_id,
+                            'duration_days'     => $reward->duration_days,
+                            'status'            => RankingRewardPayout::PENDING,
+                        ]);
 
-                continue;
-            }
+                        $user = User::find($snapshot->entity_id);
 
-            try {
-                DB::transaction(function () use ($snapshot, $reward, $rule, $actor, &$paid, &$totalValue) {
-                    // The claim row goes in BEFORE the money moves, so a crash between the
-                    // two leaves a `pending` record rather than an untracked payment.
-                    $payout = RankingRewardPayout::create([
-                        'snapshot_id'  => $snapshot->id,
-                        'user_id'      => $snapshot->entity_id,
-                        'reward_type'  => $reward->reward_type,
-                        'reward_value' => $reward->reward_value,
-                        'status'       => RankingRewardPayout::PENDING,
-                    ]);
+                        if ($user === null || ! $reward->isPayable()) {
+                            $payout->forceFill([
+                                'status' => RankingRewardPayout::FAILED,
+                                'error'  => $user === null
+                                    ? 'The user no longer exists.'
+                                    : 'The reward item is missing or inactive.',
+                            ])->save();
 
-                    $user = User::find($snapshot->entity_id);
+                            return;
+                        }
 
-                    if ($user === null) {
+                        $memo = "Ranking reward: {$rule->key} rank {$snapshot->rank}";
+
+                        $transactionId = match ($reward->reward_type) {
+                            'coins'    => $this->wallets->adjust($user, 'coin', 'credit', $reward->reward_value, $memo, $actor)->uuid,
+                            'diamonds' => $this->wallets->adjust($user, 'diamond', 'credit', $reward->reward_value, $memo, $actor)->uuid,
+                            default    => null,
+                        };
+
+                        if (RankingReward::isItemType($reward->reward_type)) {
+                            $this->inventory->grantStoreItem($user, $reward->storeItem, $reward->duration_days, 'ranking');
+                        }
+
                         $payout->forceFill([
-                            'status' => RankingRewardPayout::FAILED,
-                            'error'  => 'The user no longer exists.',
+                            'status'         => RankingRewardPayout::PAID,
+                            'paid_at'        => now(),
+                            'transaction_id' => $transactionId,
                         ])->save();
 
-                        return;
-                    }
-
-                    $transactionId = match ($reward->reward_type) {
-                        'coins' => $this->wallets->adjust(
-                            $user, 'coin', 'credit', $reward->reward_value,
-                            "Ranking reward: {$rule->key} rank {$snapshot->rank}", $actor,
-                        )->uuid,
-                        'diamonds' => $this->wallets->adjust(
-                            $user, 'diamond', 'credit', $reward->reward_value,
-                            "Ranking reward: {$rule->key} rank {$snapshot->rank}", $actor,
-                        )->uuid,
-                        default => null,
-                    };
-
-                    $payout->forceFill([
-                        'status'         => RankingRewardPayout::PAID,
-                        'paid_at'        => now(),
-                        'transaction_id' => $transactionId,
-                    ])->save();
-
-                    $paid++;
-                    $totalValue += $reward->reward_value;
-                });
-            } catch (\Illuminate\Database\UniqueConstraintViolationException) {
-                $skipped++;
+                        $paid++;
+                        $totalValue += $reward->reward_value;
+                    });
+                } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+                    $skipped++;
+                }
             }
         }
 

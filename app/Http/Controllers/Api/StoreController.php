@@ -6,12 +6,15 @@ use App\Domain\Store\InventoryService;
 use App\Domain\Store\LevelException;
 use App\Domain\Wallet\WalletService;
 use App\Http\Controllers\Controller;
+use App\Models\Block;
 use App\Models\StoreItem;
+use App\Models\User;
 use App\Models\UserStoreItem;
 use App\Models\Wallet;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -74,22 +77,63 @@ class StoreController extends Controller
     /** POST /store/items/{item}/purchase */
     public function purchase(Request $request, StoreItem $item): JsonResponse
     {
-        if (! $item->is_active) {
-            throw new LevelException('NOT_FOUND', 'That item is not available.', 404);
-        }
+        $this->ensureAvailableTo($item, $request->user());
 
-        if ($item->required_vip_tier_id !== null && ! $this->inventory->meetsTier($request->user(), $item->required_vip_tier_id)) {
-            throw new LevelException('VIP_TIER_REQUIRED', 'Your VIP tier is not high enough for that item.', 403);
-        }
+        $owned = DB::transaction(function () use ($request, $item) {
+            $this->wallets->debitSystem($request->user(), Wallet::COIN, max(1, $item->coin_price), 'store_purchase');
 
-        $this->wallets->debitSystem($request->user(), Wallet::COIN, max(1, $item->coin_price), 'store_purchase');
-
-        $owned = $this->inventory->grantStoreItem($request->user(), $item, $item->rental_days, 'purchase');
+            return $this->inventory->grantStoreItem($request->user(), $item, $item->rental_days, 'purchase');
+        });
 
         return ApiResponse::success([
             'store_item_id' => $owned->store_item_id,
             'expires_at'    => $owned->expires_at?->toIso8601ZuluString(),
         ], 'Purchased');
+    }
+
+    /**
+     * POST /store/items/{item}/send — buy it for somebody else (Store → Send → Select).
+     * The sender pays the same price; the recipient owns it for the same rental period,
+     * and the VIP gate is theirs, since they are the one who will wear it.
+     */
+    public function send(Request $request, StoreItem $item): JsonResponse
+    {
+        $data = $request->validate(['user_uuid' => ['required', 'uuid']]);
+        $sender = $request->user();
+        $recipient = User::query()->where('uuid', $data['user_uuid'])->first();
+
+        if ($recipient === null || $recipient->id === $sender->id) {
+            throw new LevelException('INVALID_RECIPIENT', 'Pick somebody else to send it to.', 422);
+        }
+
+        if (Block::existsBetween($sender->id, $recipient->id)) {
+            throw new LevelException('BLOCKED', 'You cannot send items to this user.', 403);
+        }
+
+        $this->ensureAvailableTo($item, $recipient, 'Their VIP tier is not high enough for that item.');
+
+        $owned = DB::transaction(function () use ($sender, $recipient, $item) {
+            $this->wallets->debitSystem($sender, Wallet::COIN, max(1, $item->coin_price), 'store_send');
+
+            return $this->inventory->grantStoreItem($recipient, $item, $item->rental_days, 'gift');
+        });
+
+        return ApiResponse::success([
+            'store_item_id' => $owned->store_item_id,
+            'user_uuid'     => $recipient->uuid,
+            'expires_at'    => $owned->expires_at?->toIso8601ZuluString(),
+        ], 'Sent');
+    }
+
+    protected function ensureAvailableTo(StoreItem $item, User $user, string $tierMessage = 'Your VIP tier is not high enough for that item.'): void
+    {
+        if (! $item->is_active) {
+            throw new LevelException('NOT_FOUND', 'That item is not available.', 404);
+        }
+
+        if ($item->required_vip_tier_id !== null && ! $this->inventory->meetsTier($user, $item->required_vip_tier_id)) {
+            throw new LevelException('VIP_TIER_REQUIRED', $tierMessage, 403);
+        }
     }
 
     protected function payload(StoreItem $item): array

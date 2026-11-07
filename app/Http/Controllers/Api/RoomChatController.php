@@ -29,7 +29,7 @@ class RoomChatController extends Controller
             'limit'  => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
 
-        $page = $this->chat->history($room, Cursor::decode($data['cursor'] ?? null), (int) ($data['limit'] ?? 30));
+        $page = $this->chat->history($room, $request->user(), Cursor::decode($data['cursor'] ?? null), (int) ($data['limit'] ?? 30));
 
         $items = $page['items']->map(fn (RoomMessage $m) => [
             'uuid'       => $m->uuid,

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Events\LeaderboardService;
 use App\Http\Controllers\Controller;
+use App\Models\RankingReward;
 use App\Models\RankingRule;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -56,6 +57,39 @@ class RankingController extends Controller
             ->count();
 
         return ApiResponse::success(['rank' => $rank, 'score' => $myScore]);
+    }
+
+    /**
+     * GET /rankings/rewards — `?board=wealth|charm&period=`. What the Weekly List card for
+     * each rank shows: whatever the admin panel set on that rule, up to three per rank.
+     * Rewards that could not be paid (a store item gone or switched off) are left out.
+     */
+    public function rewards(Request $request): JsonResponse
+    {
+        $rule = $this->resolveRule($request);
+
+        $rewards = RankingReward::query()
+            ->with('storeItem')
+            ->where('rule_key', $rule->key)
+            ->where('is_active', true)
+            ->orderBy('rank_from')
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (RankingReward $r) => $r->isPayable());
+
+        return ApiResponse::success([
+            'board'   => $rule->board_type,
+            'period'  => $rule->period,
+            'rewards' => $rewards->map(fn (RankingReward $r) => [
+                'id'            => $r->id,
+                'rank_from'     => $r->rank_from,
+                'rank_to'       => $r->rank_to,
+                'reward_type'   => $r->reward_type,
+                'reward_value'  => $r->reward_value,
+                'duration_days' => $r->duration_days,
+                'item'          => $r->itemPayload(),
+            ])->values()->all(),
+        ]);
     }
 
     protected function resolveRule(Request $request): RankingRule

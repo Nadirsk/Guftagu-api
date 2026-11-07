@@ -66,12 +66,27 @@ class RoomChatService
      * Newest-first, cursor-paginated the same way DM history is (docs/03 §2.3) — a room's
      * chat grows at the top while you scroll back, same as a conversation thread.
      *
+     * Like Mazag, a person only ever sees chat from their current arrival onward: what was said
+     * before they walked in — or before their last exit and re-entry — is never handed to them.
+     * Someone who is not inside the room gets nothing at all.
+     *
      * @return array{items: \Illuminate\Support\Collection<int, RoomMessage>, next_cursor: ?int}
      */
-    public function history(Room $room, ?int $beforeId, int $limit): array
+    public function history(Room $room, User $viewer, ?int $beforeId, int $limit): array
     {
+        $joinedAt = RoomMember::query()
+            ->where('room_id', $room->id)
+            ->where('user_id', $viewer->id)
+            ->where('is_active', true)
+            ->value('joined_at');
+
+        if ($joinedAt === null) {
+            return ['items' => collect(), 'next_cursor' => null];
+        }
+
         $query = RoomMessage::query()
             ->where('room_id', $room->id)
+            ->where('created_at', '>=', $joinedAt)
             ->with('user.profile:id,user_id,display_name,avatar_url,gender');
 
         if ($beforeId !== null) {

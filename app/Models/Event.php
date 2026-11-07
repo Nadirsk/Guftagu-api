@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -43,6 +44,14 @@ class Event extends Model
     public const CAMPAIGN_TYPES = ['recharge_activity', 'weekly_star', 'custom'];
 
     public const PERIODS = ['daily', 'weekly', 'monthly'];
+
+    /**
+     * Weekly Star: rounds of ROUND_DAYS counted from `starts_at` (not calendar weeks),
+     * scored only by the event's own gifts — at most MAX_GIFTS, the app's three tiles.
+     */
+    public const WEEKLY_STAR = 'weekly_star';
+    public const ROUND_DAYS = 7;
+    public const MAX_GIFTS = 3;
 
     /**
      * What a campaign event's progress (threshold tiers) or standings (rank_range
@@ -138,9 +147,46 @@ class Event extends Model
         return $this->hasMany(EventClaim::class);
     }
 
+    /** Weekly Star's "Event Gifts" — the only gifts that score. */
+    public function gifts(): BelongsToMany
+    {
+        return $this->belongsToMany(Gift::class, 'event_gifts')
+            ->withPivot('sort_order')->withTimestamps()
+            ->orderByPivot('sort_order');
+    }
+
+    public function rounds(): HasMany
+    {
+        return $this->hasMany(EventRound::class)->orderBy('period_start');
+    }
+
     public function isCampaign(): bool
     {
         return in_array($this->type, self::CAMPAIGN_TYPES, true);
+    }
+
+    /**
+     * The gift-scored Weekly Star. The older shape (riding a RankingRule through
+     * `ranking_rule_key`) keeps its calendar-week behaviour.
+     */
+    public function isGiftWeeklyStar(): bool
+    {
+        return $this->type === self::WEEKLY_STAR && $this->ranking_rule_key === null;
+    }
+
+    /**
+     * Only one Weekly Star runs at a time — the app opens "the" Weekly Star. The published
+     * one whose window overlaps this one's, if any.
+     */
+    public function clashingWeeklyStar(): ?self
+    {
+        return self::query()
+            ->where('type', self::WEEKLY_STAR)
+            ->where('status', self::SCHEDULED)
+            ->where('id', '!=', $this->id)
+            ->where('starts_at', '<', $this->ends_at)
+            ->where('ends_at', '>', $this->starts_at)
+            ->first();
     }
 
     public function luckyDraw(): HasOne

@@ -24,7 +24,8 @@ class FeedbackController extends Controller
             // fields are marked required on the screen (red *) so support
             // always has a way to follow up.
             'description' => ['required', 'string', 'max:120'],
-            'contact' => ['required', 'string', 'max:30'],
+            // An email address (Settings → Feedback → Contact Information) can run past 30.
+            'contact' => ['required', 'string', 'max:100'],
             // "Upload multiple images at a time" — capped at 6 so one feedback
             // report can't be used to bulk-upload arbitrary files.
             'images' => ['sometimes', 'array', 'max:6'],

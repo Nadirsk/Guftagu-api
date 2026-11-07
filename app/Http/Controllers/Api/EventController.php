@@ -6,6 +6,7 @@ use App\Domain\Events\EventCampaignService;
 use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\EventTier;
+use App\Models\Gift;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -43,6 +44,16 @@ class EventController extends Controller
         $payload = $this->summary($event);
         $payload['tiers'] = $event->tiers()->with('rewards')->get()
             ->map(fn (EventTier $t) => $this->campaigns->tierPayload($t))->values();
+
+        if ($event->isGiftWeeklyStar()) {
+            // The "Event Gifts" tiles — the only gifts that score this round.
+            $payload['event_gifts'] = $event->gifts->map(fn (Gift $gift) => [
+                'id'            => $gift->id,
+                'name'          => $gift->name_en,
+                'price'         => (int) $gift->coin_price,
+                'thumbnail_url' => $gift->thumbnail_url,
+            ])->values();
+        }
 
         $hasRankTiers = $event->ranking_rule_key !== null
             || $event->tiers()->where('tier_type', EventTier::RANK_RANGE)->exists();

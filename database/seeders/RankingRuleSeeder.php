@@ -20,8 +20,10 @@ class RankingRuleSeeder extends Seeder
     public const RULES = [
         ['wealth_daily', 'wealth', 'daily', 'coins_spent', 1000, 100],
         ['wealth_weekly', 'wealth', 'weekly', 'coins_spent', 5000, 100],
+        ['wealth_monthly', 'wealth', 'monthly', 'coins_spent', 20000, 100],
         ['charm_daily', 'charm', 'daily', 'diamonds_earned', 500, 100],
         ['charm_weekly', 'charm', 'weekly', 'diamonds_earned', 2500, 100],
+        ['charm_monthly', 'charm', 'monthly', 'diamonds_earned', 10000, 100],
     ];
 
     public function run(): void

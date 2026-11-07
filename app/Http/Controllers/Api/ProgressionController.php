@@ -10,7 +10,10 @@ use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-/** D.7b — wealth and charm progression, with the next threshold to show "X to go". */
+/**
+ * D.7b — wealth and charm progression, with the next threshold to show "X to go". Both
+ * are measured in coins of room gifts: sent for wealth, received for charm.
+ */
 class ProgressionController extends Controller
 {
     public function __construct(protected WalletService $wallets)
@@ -23,13 +26,15 @@ class ProgressionController extends Controller
         $wallet = $this->wallets->forUser($request->user());
 
         return ApiResponse::success([
-            'wealth' => $this->track($wallet, 'wealth', $wallet->lifetime_coins_spent),
-            'charm'  => $this->track($wallet, 'charm', $wallet->lifetime_diamonds_earned),
+            'wealth' => $this->track($wallet, 'wealth'),
+            'charm'  => $this->track($wallet, 'charm'),
         ]);
     }
 
-    protected function track(Wallet $wallet, string $type, int $lifetimeValue): array
+    /** `lifetime_value` is coins: gifts sent in rooms (wealth) or received in rooms (charm). */
+    protected function track(Wallet $wallet, string $type): array
     {
+        $lifetimeValue = $wallet->levelPoints($type);
         $current = $type === 'wealth' ? $wallet->wealthLevel() : $wallet->charmLevel();
         $next = WealthCharmLevel::nextAfter($type, $lifetimeValue);
 
@@ -37,6 +42,8 @@ class ProgressionController extends Controller
             'level'          => $current?->level,
             'name_en'        => $current?->name_en,
             'badge_url'      => $current?->badge_url,
+            // Where the current level starts — with next_level.threshold, the progress bar's two ends.
+            'threshold'      => $current?->threshold,
             'lifetime_value' => $lifetimeValue,
             'next_level'     => $next === null ? null : [
                 'level'     => $next->level,

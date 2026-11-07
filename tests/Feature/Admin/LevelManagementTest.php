@@ -58,10 +58,15 @@ class LevelManagementTest extends TestCase
     public function a_wallets_level_is_derived_from_lifetime_totals_with_no_job_involved(): void
     {
         $user = $this->makeUser();
-        $wallet = Wallet::create(['user_id' => $user->id, 'lifetime_coins_spent' => 60_000, 'lifetime_diamonds_earned' => 6_000]);
+        $wallet = Wallet::create([
+            'user_id' => $user->id,
+            'lifetime_gift_coins_sent' => 60_000, 'lifetime_gift_coins_received' => 6_000,
+            // Spending outside room gifts, and diamonds, do not move either level.
+            'lifetime_coins_spent' => 900_000, 'lifetime_diamonds_earned' => 900_000,
+        ]);
 
         // Seeded ladder: wealth III starts at 50,000; charm III starts at 25,000 — 6,000
-        // diamonds only clears charm II (5,000).
+        // received only clears charm II (5,000).
         $this->assertSame('Wealth III', $wallet->wealthLevel()?->name_en);
         $this->assertSame('Charm II', $wallet->charmLevel()?->name_en);
     }

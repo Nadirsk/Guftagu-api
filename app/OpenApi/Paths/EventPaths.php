@@ -516,7 +516,8 @@ MD,
 )]
 #[OA\Get(
     path: '/admin/ranking-rules/{rule}/rewards',
-    summary: 'Reward bands for a rule',
+    summary: 'Rewards for a rule',
+    description: 'Each row is one reward: currency with an amount, or a store item (`item`, `duration_days`). `payable` is false when its item is missing or inactive.',
     security: [['bearerAuth' => []]],
     tags: ['Rankings'],
     parameters: [new OA\Parameter(name: 'rule', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
@@ -524,30 +525,38 @@ MD,
 )]
 #[OA\Post(
     path: '/admin/ranking-rules/{rule}/rewards',
-    summary: 'Add a reward band to a rule',
+    summary: 'Add a reward to a rank range',
+    description: <<<'MD'
+Same shape as a check-in day: `coins`/`diamonds` take `reward_value`; any StoreItem type takes
+`store_item_id` (an item of that type) and `duration_days` (null = permanent). A rank may carry
+up to 3 active rewards — the app's Weekly List card has three slots.
+MD,
     security: [['bearerAuth' => []]],
     tags: ['Rankings'],
     parameters: [new OA\Parameter(name: 'rule', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
     requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
-        required: ['rank_from', 'rank_to', 'reward_type', 'reward_value'],
+        required: ['rank_from', 'rank_to', 'reward_type'],
         properties: [
             new OA\Property(property: 'rank_from', type: 'integer', minimum: 1),
             new OA\Property(property: 'rank_to', type: 'integer'),
-            new OA\Property(property: 'reward_type', type: 'string', enum: ['coins', 'diamonds']),
-            new OA\Property(property: 'reward_value', type: 'integer', minimum: 1),
+            new OA\Property(property: 'reward_type', type: 'string', example: 'frame', description: '`coins`, `diamonds` or a StoreItem type'),
+            new OA\Property(property: 'reward_value', type: 'integer', minimum: 1, description: 'Required for coins/diamonds'),
+            new OA\Property(property: 'store_item_id', type: 'integer', nullable: true, description: 'Required for a StoreItem type'),
+            new OA\Property(property: 'duration_days', type: 'integer', nullable: true, minimum: 1, maximum: 3650),
+            new OA\Property(property: 'is_active', type: 'boolean'),
         ]
     )),
     responses: [
         new OA\Response(response: 201, description: 'Added', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
-        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — overlapping ranks', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — a rank already has 3 rewards (`details.full_rank`), or the item does not match the type', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]
 #[OA\Patch(
     path: '/admin/ranking-rules/{rule}/rewards/{reward}',
-    summary: 'Edit a reward band',
+    summary: 'Edit a reward',
     description: <<<'MD'
-A band carries no capacity or claimed-count of its own — a payout copies its `reward_type`
-and `reward_value` onto its own row the moment it pays, so editing a band afterwards cannot
+Takes the full body, as on create. A reward carries no capacity or claimed-count of its own —
+a payout copies it onto its own row the moment it pays, so editing it afterwards cannot
 retouch a payout that already happened.
 MD,
     security: [['bearerAuth' => []]],
@@ -556,17 +565,21 @@ MD,
         new OA\Parameter(name: 'rule', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
         new OA\Parameter(name: 'reward', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
     ],
-    requestBody: new OA\RequestBody(content: new OA\JsonContent(
+    requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+        required: ['rank_from', 'rank_to', 'reward_type'],
         properties: [
             new OA\Property(property: 'rank_from', type: 'integer', minimum: 1),
             new OA\Property(property: 'rank_to', type: 'integer'),
-            new OA\Property(property: 'reward_type', type: 'string', enum: ['coins', 'diamonds']),
+            new OA\Property(property: 'reward_type', type: 'string', example: 'coins'),
             new OA\Property(property: 'reward_value', type: 'integer', minimum: 1),
+            new OA\Property(property: 'store_item_id', type: 'integer', nullable: true),
+            new OA\Property(property: 'duration_days', type: 'integer', nullable: true, minimum: 1, maximum: 3650),
+            new OA\Property(property: 'is_active', type: 'boolean'),
         ]
     )),
     responses: [
         new OA\Response(response: 200, description: 'Updated', content: new OA\JsonContent(ref: '#/components/schemas/Envelope')),
-        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — overlapping ranks or inverted range', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
+        new OA\Response(response: 422, description: '`VALIDATION_ERROR` — rank full, inverted range, or item/type mismatch', content: new OA\JsonContent(ref: '#/components/schemas/ErrorEnvelope')),
     ]
 )]
 #[OA\Delete(
@@ -584,7 +597,7 @@ MD,
     path: '/admin/ranking-rules/{rule}/pay-rewards',
     summary: 'Pay a snapshotted period (A.9d)',
     description: <<<'MD'
-**Idempotent.** A payout row is created under a unique index on (snapshot, user) *before*
+**Idempotent.** A payout row is created under a unique index on (snapshot, user, reward) *before*
 any money moves, so re-running the job pays nothing further — the second run reports what
 it skipped rather than double-paying.
 

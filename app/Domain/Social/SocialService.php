@@ -125,7 +125,7 @@ class SocialService
     {
         $relation = $direction === 'followers' ? $profile->followers() : $profile->following();
 
-        $relation->with('profile:id,user_id,display_name,avatar_url,gender')
+        $relation->with('profile:id,user_id,display_name,avatar_url,gender,country')
             ->where('users.status', '!=', User::STATUS_DELETED);
 
         if ($viewer !== null) {
@@ -293,7 +293,7 @@ class SocialService
     {
         return UserVisit::query()
             ->where('profile_id', $profileOwner->id)
-            ->with(['visitor.profile:id,user_id,display_name,avatar_url,gender'])
+            ->with(['visitor.profile:id,user_id,display_name,avatar_url,gender,country'])
             ->orderByDesc('visited_at')
             ->paginate(perPage: $perPage, page: $page);
     }

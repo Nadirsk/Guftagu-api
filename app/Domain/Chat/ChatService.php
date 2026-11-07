@@ -232,11 +232,31 @@ class ChatService
         // group a block only removes that person from the fan-out, since one block should
         // not silence the room.
         if ($conversation->type === Conversation::DIRECT) {
-            foreach ($recipients as $recipient) {
-                if (Block::existsBetween($sender->id, $recipient->user_id)) {
+            // The other person may have deleted the chat (left_at set), which drops them
+            // from `$recipients`. The block check must still see them, or a blocked sender's
+            // message is stored and silently goes nowhere.
+            $others = ConversationParticipant::query()
+                ->where('conversation_id', $conversation->id)
+                ->where('user_id', '!=', $sender->id)
+                ->get();
+
+            foreach ($others as $other) {
+                if (Block::existsBetween($sender->id, $other->user_id)) {
                     throw SocialException::blocked();
                 }
             }
+
+            // Someone who deleted the chat gets it back when the other person writes again:
+            // only the new message shows, the history they cleared stays cleared.
+            $lastId = (int) Message::where('conversation_id', $conversation->id)->max('id');
+            foreach ($others->whereNotNull('left_at') as $gone) {
+                $gone->forceFill([
+                    'left_at'                   => null,
+                    'cleared_before_message_id' => $lastId ?: null,
+                ])->save();
+            }
+
+            $recipients = $others;
         } else {
             $recipients = $recipients->reject(
                 fn (ConversationParticipant $p) => Block::existsBetween($sender->id, $p->user_id)

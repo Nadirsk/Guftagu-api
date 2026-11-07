@@ -334,8 +334,9 @@ without real recharges yet). `USER_SANCTIONED`/`WALLET_FROZEN` are not yet enfor
 | POST | `/checkin` | Claim today (D.7c). `409 ALREADY_CLAIMED` same day; missing a calendar day resets to day 1; completing day 7 rolls into a new cycle at day 1 rather than stopping |
 | GET | `/rankings` | `?board=wealth\|charm\|room\|agency&period=daily\|weekly\|monthly` — from Redis |
 | GET | `/rankings/me` | Caller's rank on each board |
+| GET | `/rankings/rewards` | `?board=wealth\|charm&period=weekly` — the rewards set in the admin panel for each rank (Weekly List cards). Each row: `rank_from`, `rank_to`, `reward_type` (`coins`/`diamonds` or a StoreItem type), `reward_value`, `duration_days` (null = permanent), `item` (`id`, `type`, `name`, `image_url`, `animation_url`; null for currency). Up to 3 per rank; rows whose item is missing/inactive are left out |
 | GET | `/events` | `?status=live\|upcoming\|ended` |
-| GET | `/events/{uuid}` | Detail, rules, rewards, leaderboard |
+| GET | `/events/{uuid}` | Detail, rules, rewards, leaderboard. Weekly Star also sends `event_gifts` (`id`, `name`, `price`, `thumbnail_url` — the only gifts that score, by coin value); its `board` and `cycle_ends_at` are the current 7-day round, counted from the campaign start. Each reward's `catalog.image_url` is the granted item's own picture |
 | POST | `/events/{uuid}/join` | Deducts entry cost if any |
 | GET | `/events/{uuid}/leaderboard` | |
 | POST | `/events/{uuid}/claim/{rewardId}` | |
@@ -346,6 +347,10 @@ without real recharges yet). `USER_SANCTIONED`/`WALLET_FROZEN` are not yet enfor
 does), `GET /progression`, `GET /badges`, `GET /store/items`, `GET /store/items/mine`,
 `POST /store/items/{id}/purchase` (the spec's `/frames` is generalized here to any `StoreItem` type
 — frame, bubble, entry banner, entrance effect — rather than one endpoint per type),
+`POST /store/items/{id}/send` `{ user_uuid }` (2026-11-03; the Store's Send → Select flow: the
+sender pays `coin_price`, the recipient gets the item for `rental_days` with `source: gift`; 422
+`INVALID_RECIPIENT` for yourself or an unknown user, 403 `BLOCKED` when either side blocked the other,
+403 `VIP_TIER_REQUIRED` when the recipient's tier is too low),
 `GET /rankings`, `GET /rankings/me` (`wealth`/`charm` boards only, same restriction the admin panel
 already has). **Not built:** `POST /vip/auto-renew`, equipping an owned frame/bubble/effect (no
 "currently equipped" column exists yet), an achievements auto-tracking engine (deliberately
@@ -609,6 +614,10 @@ SLA's "approves high-risk actions such as … large payouts". The threshold live
 | POST | `/admin/events/{id}/approve` | `events.manage` — Manager-created events need approval |
 | CRUD | `/admin/events/{id}/rewards` | `events.reward_manage` (A.9b) |
 | POST | `/admin/lucky-draws/{id}/draw` | `events.manage` — publishes seed and result |
+| POST/GET/PATCH | `/admin/weekly-stars[/{event}]` | `events.manage` / `events.view` — start date + weeks (7-day rounds), Top 1–3 tiers created automatically. Publish/cancel via `/admin/events/{id}/publish\|cancel`; only one Weekly Star may be published for overlapping dates |
+| PUT | `/admin/weekly-stars/{event}/gifts` | `events.manage` — up to 3 Event Gifts |
+| POST | `/admin/weekly-stars/{event}/tiers/{tier}/rewards` | `events.reward_manage` — coins/diamonds amount, or a frame/entry effect/chat bubble/VIP/medal for N days |
+| POST | `/admin/weekly-stars/{event}/settle` | `events.reward_manage` — manual backup; finished rounds pay their Top 3 automatically every 15 min (`events:settle-weekly-star`) |
 | CRUD | `/admin/ranking-rules` | `rankings.rules_manage` (A.9c) |
 | POST | `/admin/rankings/{ruleKey}/payout` | `rankings.reward_payout` (A.9d) |
 | CRUD | `/admin/banners` | `cms.banner_manage` (A.10a, B.3b) |

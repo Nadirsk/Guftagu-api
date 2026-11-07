@@ -9365,7 +9365,8 @@
                 "tags": [
                     "Rankings"
                 ],
-                "summary": "Reward bands for a rule",
+                "summary": "Rewards for a rule",
+                "description": "Each row is one reward: currency with an amount, or a store item (`item`, `duration_days`). `payable` is false when its item is missing or inactive.",
                 "operationId": "df71524f6e78835c6d8967b388f55ae2",
                 "parameters": [
                     {
@@ -9399,7 +9400,8 @@
                 "tags": [
                     "Rankings"
                 ],
-                "summary": "Add a reward band to a rule",
+                "summary": "Add a reward to a rank range",
+                "description": "Same shape as a check-in day: `coins`/`diamonds` take `reward_value`; any StoreItem type takes\n`store_item_id` (an item of that type) and `duration_days` (null = permanent). A rank may carry\nup to 3 active rewards — the app's Weekly List card has three slots.",
                 "operationId": "4bb76a2d26c57f76e6e06ec320283194",
                 "parameters": [
                     {
@@ -9419,8 +9421,7 @@
                                 "required": [
                                     "rank_from",
                                     "rank_to",
-                                    "reward_type",
-                                    "reward_value"
+                                    "reward_type"
                                 ],
                                 "properties": {
                                     "rank_from": {
@@ -9431,15 +9432,28 @@
                                         "type": "integer"
                                     },
                                     "reward_type": {
+                                        "description": "`coins`, `diamonds` or a StoreItem type",
                                         "type": "string",
-                                        "enum": [
-                                            "coins",
-                                            "diamonds"
-                                        ]
+                                        "example": "frame"
                                     },
                                     "reward_value": {
+                                        "description": "Required for coins/diamonds",
                                         "type": "integer",
                                         "minimum": 1
+                                    },
+                                    "store_item_id": {
+                                        "description": "Required for a StoreItem type",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "duration_days": {
+                                        "type": "integer",
+                                        "nullable": true,
+                                        "maximum": 3650,
+                                        "minimum": 1
+                                    },
+                                    "is_active": {
+                                        "type": "boolean"
                                     }
                                 },
                                 "type": "object"
@@ -9459,7 +9473,7 @@
                         }
                     },
                     "422": {
-                        "description": "`VALIDATION_ERROR` — overlapping ranks",
+                        "description": "`VALIDATION_ERROR` — a rank already has 3 rewards (`details.full_rank`), or the item does not match the type",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -9523,8 +9537,8 @@
                 "tags": [
                     "Rankings"
                 ],
-                "summary": "Edit a reward band",
-                "description": "A band carries no capacity or claimed-count of its own — a payout copies its `reward_type`\nand `reward_value` onto its own row the moment it pays, so editing a band afterwards cannot\nretouch a payout that already happened.",
+                "summary": "Edit a reward",
+                "description": "Takes the full body, as on create. A reward carries no capacity or claimed-count of its own —\na payout copies it onto its own row the moment it pays, so editing it afterwards cannot\nretouch a payout that already happened.",
                 "operationId": "421dfc9196b59abae32003f4ceac6d81",
                 "parameters": [
                     {
@@ -9545,9 +9559,15 @@
                     }
                 ],
                 "requestBody": {
+                    "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
+                                "required": [
+                                    "rank_from",
+                                    "rank_to",
+                                    "reward_type"
+                                ],
                                 "properties": {
                                     "rank_from": {
                                         "type": "integer",
@@ -9558,14 +9578,24 @@
                                     },
                                     "reward_type": {
                                         "type": "string",
-                                        "enum": [
-                                            "coins",
-                                            "diamonds"
-                                        ]
+                                        "example": "coins"
                                     },
                                     "reward_value": {
                                         "type": "integer",
                                         "minimum": 1
+                                    },
+                                    "store_item_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "duration_days": {
+                                        "type": "integer",
+                                        "nullable": true,
+                                        "maximum": 3650,
+                                        "minimum": 1
+                                    },
+                                    "is_active": {
+                                        "type": "boolean"
                                     }
                                 },
                                 "type": "object"
@@ -9585,7 +9615,7 @@
                         }
                     },
                     "422": {
-                        "description": "`VALIDATION_ERROR` — overlapping ranks or inverted range",
+                        "description": "`VALIDATION_ERROR` — rank full, inverted range, or item/type mismatch",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -9608,7 +9638,7 @@
                     "Rankings"
                 ],
                 "summary": "Pay a snapshotted period (A.9d)",
-                "description": "**Idempotent.** A payout row is created under a unique index on (snapshot, user) *before*\nany money moves, so re-running the job pays nothing further — the second run reports what\nit skipped rather than double-paying.\n\nCreating the row first also means a crash between the two steps leaves a `pending` record\nrather than an untracked payment.\n\nRequires a snapshot for the period; there is nothing to pay against otherwise.",
+                "description": "**Idempotent.** A payout row is created under a unique index on (snapshot, user, reward) *before*\nany money moves, so re-running the job pays nothing further — the second run reports what\nit skipped rather than double-paying.\n\nCreating the row first also means a crash between the two steps leaves a `pending` record\nrather than an untracked payment.\n\nRequires a snapshot for the period; there is nothing to pay against otherwise.",
                 "operationId": "b29ebd1166d0d4b079e0fe2fa10b5281",
                 "parameters": [
                     {
@@ -22472,6 +22502,444 @@
                     }
                 ]
             }
+        },
+        "/admin/weekly-stars": {
+            "post": {
+                "tags": [
+                    "Weekly Star"
+                ],
+                "summary": "Create a Weekly Star (draft)",
+                "description": "Starts at 00:00 on `starts_on` and runs `weeks` rounds of 7 days. Creates the three\nrank tiers (Top 1, Top 2, Top 3) the app's Reward tab shows. Publish it with\n`POST /admin/events/{event}/publish` — only one Weekly Star may be published for any\ngiven dates.",
+                "operationId": "e00a757a980f3124328a024823add205",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "title_en",
+                                    "starts_on",
+                                    "weeks"
+                                ],
+                                "properties": {
+                                    "title_en": {
+                                        "type": "string",
+                                        "maxLength": 150
+                                    },
+                                    "title_hi": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "starts_on": {
+                                        "description": "Today or later",
+                                        "type": "string",
+                                        "format": "date"
+                                    },
+                                    "weeks": {
+                                        "type": "integer",
+                                        "maximum": 52,
+                                        "minimum": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/weekly-stars/{event}": {
+            "get": {
+                "tags": [
+                    "Weekly Star"
+                ],
+                "summary": "A Weekly Star as the admin page shows it",
+                "description": "`event`, the Event `gifts`, the Top 1–3 `tiers` with their rewards, every round (`upcoming`, `live`, `due`, `settled` with its standings) and the live round's top 10 `board`.",
+                "operationId": "b0a2c10b987b46253a3e325eb322ff9b",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not a gift-scored Weekly Star",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Weekly Star"
+                ],
+                "summary": "Edit a Weekly Star",
+                "description": "The start date can only move before the campaign starts; `weeks` may not cut into a round already under way.",
+                "operationId": "acd92410539174dd15a6ac9809d6cc49",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "title_en": {
+                                        "type": "string"
+                                    },
+                                    "title_hi": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "rules": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "nullable": true
+                                    },
+                                    "starts_on": {
+                                        "type": "string",
+                                        "format": "date"
+                                    },
+                                    "weeks": {
+                                        "type": "integer",
+                                        "maximum": 52,
+                                        "minimum": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed, or another published Weekly Star overlaps",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/weekly-stars/{event}/gifts": {
+            "put": {
+                "tags": [
+                    "Weekly Star"
+                ],
+                "summary": "Set the Event Gifts",
+                "description": "Up to 3 gift ids, in tile order. Only sending these gifts scores, by coin value; an empty list means nothing scores.",
+                "operationId": "2e89bc0dbd0063fd52604669d3807b48",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "gift_ids"
+                                ],
+                                "properties": {
+                                    "gift_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer"
+                                        },
+                                        "maxItems": 3
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Saved",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/weekly-stars/{event}/tiers/{tier}/rewards": {
+            "post": {
+                "tags": [
+                    "Weekly Star"
+                ],
+                "summary": "Add a reward to a Top N card",
+                "description": "`coins`/`diamonds` take `reward_value`. `frame`, `entry_effect`, `chat_bubble` take a store\nitem `ref_id`, `vip` a VIP tier, `badge` a badge — with `duration_days` (required for VIP;\nnull = permanent otherwise). The reward catalog row is found or created automatically.\nRemove with `DELETE /admin/events/{event}/tiers/{tier}/rewards/{reward}`.",
+                "operationId": "d091a56175e33058a488d9d1cbe9d024",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "tier",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "reward_type"
+                                ],
+                                "properties": {
+                                    "reward_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "coins",
+                                            "diamonds",
+                                            "frame",
+                                            "entry_effect",
+                                            "chat_bubble",
+                                            "vip",
+                                            "badge"
+                                        ]
+                                    },
+                                    "ref_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "reward_value": {
+                                        "type": "integer",
+                                        "nullable": true,
+                                        "minimum": 1
+                                    },
+                                    "duration_days": {
+                                        "type": "integer",
+                                        "nullable": true,
+                                        "maximum": 3650,
+                                        "minimum": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Added",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/weekly-stars/{event}/settle": {
+            "post": {
+                "tags": [
+                    "Weekly Star"
+                ],
+                "summary": "Pay a finished round now (manual backup)",
+                "description": "Rounds settle themselves every 15 minutes via `events:settle-weekly-star`. Running this again pays only anyone a previous run missed.",
+                "operationId": "bb68c4f037c332c528ab9d1ff57c676f",
+                "parameters": [
+                    {
+                        "name": "event",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "period_start"
+                                ],
+                                "properties": {
+                                    "period_start": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Settled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Envelope"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "`BAD_REQUEST` — the round has not finished",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
         }
     },
     "components": {
@@ -24506,6 +24974,10 @@
         {
             "name": "System",
             "description": "System"
+        },
+        {
+            "name": "Weekly Star",
+            "description": "Weekly Star"
         }
     ]
 }

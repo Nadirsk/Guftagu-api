@@ -107,6 +107,20 @@ class User extends Authenticatable
         return $this->hasOne(Wallet::class);
     }
 
+    /**
+     * The avatar frame this user wears (Item Bag → Equip), unexpired and still sold.
+     * One frame is worn at a time; `SocialPresenter::frame()` turns it into the
+     * `frame` every person card carries, so it shows wherever their photo does.
+     */
+    public function wornFrame(): HasOne
+    {
+        return $this->hasOne(UserStoreItem::class)
+            ->whereNotNull('equipped_at')
+            ->active()
+            ->whereHas('storeItem', fn (Builder $q) => $q->where('type', StoreItem::TYPE_FRAME)->where('is_active', true))
+            ->latest('equipped_at');
+    }
+
     public function kyc(): HasOne
     {
         return $this->hasOne(UserKyc::class)->latestOfMany();
