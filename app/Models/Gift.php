@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -35,6 +36,22 @@ class Gift extends Model
             'is_active'        => 'boolean',
             'sort_order'       => 'integer',
         ];
+    }
+
+    /**
+     * Art imported from Mehfil is stored as a root-relative path (`/placeholder/gifts/x.png`,
+     * served from `public/`). The app uses the URL as-is, so it is made absolute against the
+     * host the request came in on. Absolute (e.g. object-storage) URLs pass through untouched.
+     */
+    protected function thumbnailUrl(): Attribute
+    {
+        return Attribute::get(function (?string $value) {
+            if ($value === null || ! str_starts_with($value, '/') || str_starts_with($value, '//')) {
+                return $value;
+            }
+
+            return request()->getSchemeAndHttpHost().$value;
+        });
     }
 
     public function category(): BelongsTo

@@ -15,6 +15,8 @@ use App\Models\Room;
 use App\Models\RoomMember;
 use App\Models\RoomSeat;
 use App\Models\User;
+use App\Models\UserSanction;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
@@ -40,7 +42,7 @@ class RoomParticipationService
         }
 
         if ($room->isBlockedForUser($user->id)) {
-            throw new RoomException('FORBIDDEN', 'You cannot rejoin this room right now.', 403);
+            throw new RoomException('FORBIDDEN', $this->blockedMessage($room, $user), 403);
         }
 
         // D.2a — "private (password-protected) rooms". The owner and an already-active
@@ -59,6 +61,10 @@ class RoomParticipationService
             throw new RoomException('FORBIDDEN', 'That password is not correct.', 403);
         }
 
+        // One room at a time: being let into this one takes you out of any other room you are
+        // still in — and off the seat you held there.
+        $this->leaveOtherRooms($room, $user);
+
         $arrived = false;
 
         $member = DB::transaction(function () use ($room, $user, &$arrived) {
@@ -75,15 +81,23 @@ class RoomParticipationService
                     'user_id'   => $user->id,
                     'role'      => 'listener',
                     'joined_at' => now(),
+                    'last_seen_at' => now(),
                     'is_active' => true,
                 ]);
             }
 
-            if (! $member->is_active) {
+            // Still marked inside, but the heartbeat went quiet (app closed, phone locked, left
+            // minimised): they are really gone, so this is a fresh arrival — a new join time,
+            // which is what keeps the chat from their absence out of their view.
+            $stale = $member->is_active
+                && ($member->last_seen_at === null ? $member->joined_at?->lt(now()->subSeconds(90)) : $member->last_seen_at->lt(now()->subSeconds(90)));
+
+            if (! $member->is_active || $stale) {
                 $arrived = true;
                 $member->forceFill([
                     'is_active'        => true,
                     'joined_at'        => now(),
+                    'last_seen_at'     => now(),
                     'left_at'          => null,
                     'duration_seconds' => null,
                 ])->save();
@@ -103,6 +117,27 @@ class RoomParticipationService
         }
 
         return $member;
+    }
+
+    /**
+     * Takes `$user` out of every room except `$keep` (member row closed, seat vacated, everybody
+     * told) — whichever way they got into two: a second device, a room left minimised, a closed app.
+     */
+    protected function leaveOtherRooms(Room $keep, User $user): void
+    {
+        $roomIds = RoomMember::query()
+            ->where('user_id', $user->id)
+            ->where('is_active', true)
+            ->where('room_id', '!=', $keep->id)
+            ->pluck('room_id')
+            ->merge(
+                RoomSeat::query()->where('user_id', $user->id)->where('room_id', '!=', $keep->id)->pluck('room_id')
+            )
+            ->unique();
+
+        foreach (Room::query()->whereIn('id', $roomIds)->get() as $other) {
+            $this->leave($other, $user);
+        }
     }
 
     public function leave(Room $room, User $user): void
@@ -283,5 +318,33 @@ class RoomParticipationService
         ])->save();
 
         SeatVacated::dispatch($room, $seatNumber, $user);
+    }
+
+    /** "The host removed you from this room. You can join again in 4 min." — says how long is left. */
+    protected function blockedMessage(Room $room, User $user): string
+    {
+        $until = UserSanction::query()
+            ->where('room_id', $room->id)
+            ->where('user_id', $user->id)
+            ->where('type', UserSanction::ROOM_BAN)
+            ->active()
+            ->max('expires_at');
+
+        if ($until === null) {
+            return 'You have been removed from this room.';
+        }
+
+        $minutes = max(1, (int) ceil(now()->diffInSeconds(Carbon::parse($until), false) / 60));
+        $days = intdiv($minutes, 1440);
+        $hours = intdiv($minutes % 1440, 60);
+        $mins = $minutes % 60;
+
+        $parts = array_filter([
+            $days ? $days.($days === 1 ? ' day' : ' days') : null,
+            $hours ? $hours.' hr' : null,
+            ($mins && $days === 0) ? $mins.' min' : null,
+        ]);
+
+        return 'The host removed you from this room. You can join again in '.implode(' ', $parts ?: ['1 min']).'.';
     }
 }

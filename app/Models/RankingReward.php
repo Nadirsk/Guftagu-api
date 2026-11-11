@@ -20,6 +20,14 @@ class RankingReward extends Model
 
     public const MAX_PER_RANK = 3;
 
+    /** The CP Reward cards hold four slots, the Weekly List cards three. */
+    public const MAX_PER_RANK_CP = 4;
+
+    public static function maxPerRank(RankingRule $rule): int
+    {
+        return $rule->board_type === 'cp' ? self::MAX_PER_RANK_CP : self::MAX_PER_RANK;
+    }
+
     /** Currencies plus every cosmetic type the store sells. */
     public static function types(): array
     {

@@ -13,6 +13,8 @@ use App\Support\ApiResponse;
 use App\Support\Cursor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /** D.6c/e — the caller's own wallet and ledger, the app-facing half of `UserWalletController`. */
 class WalletController extends Controller
@@ -42,6 +44,49 @@ class WalletController extends Controller
         ]);
     }
 
+    /**
+     * POST /wallet/exchange — spends whole multiples of the rate in diamonds and credits the
+     * coins they buy. Both ledger rows go in one transaction; a replayed Idempotency-Key
+     * returns the first result instead of exchanging twice.
+     */
+    public function exchange(Request $request): JsonResponse
+    {
+        $data = $request->validate(['diamonds' => ['required', 'integer', 'min:1', 'max:1000000000']]);
+
+        $rate = max(1, (int) config('guftagu.diamonds_per_coin'));
+        $diamonds = (int) $data['diamonds'];
+        $coins = intdiv($diamonds, $rate);
+
+        if ($coins < 1) {
+            return ApiResponse::error('INVALID_AMOUNT', "Exchange at least {$rate} diamonds for 1 coin.", ['rate' => $rate], 422);
+        }
+
+        $spent = $coins * $rate; // any remainder stays in the wallet
+        $user = $request->user();
+        $key = $request->header('Idempotency-Key');
+        $key = $key ? 'exchange:'.$user->id.':'.substr($key, 0, 100) : null;
+
+        $wallet = $this->wallets->forUser($user);
+        if ($wallet->is_frozen) {
+            return ApiResponse::error('WALLET_FROZEN', 'Your wallet is frozen.', null, 403);
+        }
+
+        $wallet = DB::transaction(function () use ($user, $spent, $coins, $key) {
+            $this->wallets->debitSystem($user, Wallet::DIAMOND, $spent, 'exchange_to_coin', $key);
+            $this->wallets->creditSystem($user, Wallet::COIN, $coins, 'exchange_from_diamond', $key);
+
+            return $this->wallets->forUser($user)->refresh();
+        });
+
+        return ApiResponse::success([
+            'diamonds_spent'  => $spent,
+            'coins_added'     => $coins,
+            'rate'            => $rate,
+            'coin_balance'    => $wallet->coin_balance,
+            'diamond_balance' => $wallet->diamond_balance,
+        ], 'Exchanged');
+    }
+
     /** GET /wallet/coins/transactions */
     public function coinTransactions(Request $request): JsonResponse
     {
@@ -60,12 +105,33 @@ class WalletController extends Controller
         $data = $request->validate([
             'cursor' => ['sometimes', 'nullable', 'string', 'max:200'],
             'limit'  => ['sometimes', 'integer', 'min:1', 'max:100'],
+            // The history page's Consume / Income switch, its category chips and its date.
+            'direction' => ['sometimes', 'nullable', 'in:credit,debit'],
+            'types'     => ['sometimes', 'nullable', 'string', 'max:300'],  // comma-separated
+            'from'      => ['sometimes', 'nullable', 'date'],
+            'to'        => ['sometimes', 'nullable', 'date'],
         ]);
 
         $beforeId = Cursor::decode($data['cursor'] ?? null);
         $limit = (int) ($data['limit'] ?? 30);
 
         $query = $model::query()->where('user_id', $request->user()->id);
+
+        if (! empty($data['direction'])) {
+            $query->where('direction', $data['direction']);
+        }
+
+        if (! empty($data['types'])) {
+            $query->whereIn('type', array_filter(array_map('trim', explode(',', $data['types']))));
+        }
+
+        if (! empty($data['from'])) {
+            $query->where('created_at', '>=', Carbon::parse($data['from'])->startOfDay());
+        }
+
+        if (! empty($data['to'])) {
+            $query->where('created_at', '<=', Carbon::parse($data['to'])->endOfDay());
+        }
 
         if ($beforeId !== null) {
             $query->where('id', '<', $beforeId);

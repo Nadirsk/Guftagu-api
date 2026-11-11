@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Support\ApiResponse;
+use App\Support\SocialPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,20 @@ use Illuminate\Support\Facades\DB;
  */
 class ProfileController extends Controller
 {
+    /**
+     * GET /users/{profile} — somebody's public Profile page (Figma 732:16069): the person card
+     * (name, ID, photo, country, gender, levels, frame) plus whether the caller follows them.
+     */
+    public function show(Request $request, User $profile): JsonResponse
+    {
+        $me = $request->user();
+
+        return ApiResponse::success(SocialPresenter::user($profile) + [
+            'is_self'      => $profile->id === $me->id,
+            'is_following' => DB::table('follows')->where('follower_id', $me->id)->where('following_id', $profile->id)->exists(),
+        ]);
+    }
+
     /**
      * GET /users/{profile}/stats — Following / Followers / Visitors.
      *
@@ -65,7 +80,9 @@ class ProfileController extends Controller
                     'id'            => $r->id,
                     'code'          => $r->code,
                     'name_en'       => $r->name_en,
-                    'thumbnail_url' => $r->thumbnail_url,
+                    'thumbnail_url' => $r->thumbnail_url !== null && str_starts_with($r->thumbnail_url, '/') && ! str_starts_with($r->thumbnail_url, '//')
+                        ? request()->getSchemeAndHttpHost().$r->thumbnail_url
+                        : $r->thumbnail_url,
                 ],
                 'quantity' => (int) $r->quantity,
             ])->all(),

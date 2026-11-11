@@ -24,6 +24,9 @@ class RankingRuleSeeder extends Seeder
         ['charm_daily', 'charm', 'daily', 'diamonds_earned', 500, 100],
         ['charm_weekly', 'charm', 'weekly', 'diamonds_earned', 2500, 100],
         ['charm_monthly', 'charm', 'monthly', 'diamonds_earned', 10000, 100],
+        // Rewards-only: CP pairs and points are not tracked, so this only carries the CP
+        // Reward tab's rewards (set in the admin Rankings page).
+        ['cp_weekly', 'cp', 'weekly', 'cp_points', 10_000_000, 10],
     ];
 
     public function run(): void

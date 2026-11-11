@@ -35,9 +35,9 @@ class RoomGiftController extends Controller
         $idempotencyKey = $request->header('X-Idempotency-Key');
         $sender = $request->user();
 
-        // "all" is everyone on a mic except the sender; each gets the full quantity.
+        // "all" is everyone on a mic — the sender too, as in Mazag; each gets the full quantity.
         if ($data['to_user'] === 'all') {
-            $receivers = $room->seats()->whereNotNull('user_id')->where('user_id', '!=', $sender->id)->with('user')->get()
+            $receivers = $room->seats()->whereNotNull('user_id')->with('user')->get()
                 ->pluck('user')->filter()->unique('id')->values();
 
             if ($receivers->isEmpty()) {

@@ -91,6 +91,13 @@ class RoomController extends Controller
     /** GET /rooms/{room}/state — the single most-called endpoint in the app (docs/03 §194). */
     public function state(Request $request, Room $room): JsonResponse
     {
+        // The app polls this every few seconds while the room is open — that is the heartbeat.
+        \App\Models\RoomMember::query()
+            ->where('room_id', $room->id)
+            ->where('user_id', $request->user()->id)
+            ->where('is_active', true)
+            ->update(['last_seen_at' => now()]);
+
         return ApiResponse::success($this->snapshot($room, $request->user()));
     }
 

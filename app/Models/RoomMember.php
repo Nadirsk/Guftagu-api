@@ -14,7 +14,7 @@ class RoomMember extends Model
     public const LISTENER = 'listener';
 
     protected $fillable = [
-        'room_id', 'user_id', 'role', 'joined_at', 'left_at', 'duration_seconds', 'is_active',
+        'room_id', 'user_id', 'role', 'joined_at', 'last_seen_at', 'left_at', 'duration_seconds', 'is_active',
         'hand_raised_at',
     ];
 
@@ -22,6 +22,7 @@ class RoomMember extends Model
     {
         return [
             'joined_at'      => 'datetime',
+            'last_seen_at'   => 'datetime',
             'left_at'        => 'datetime',
             'is_active'      => 'boolean',
             'hand_raised_at' => 'datetime',

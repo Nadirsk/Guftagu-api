@@ -76,6 +76,18 @@ class RankingController extends Controller
     {
         [$start, $end] = $this->leaderboards->periodFor($rule);
 
+        if (! $rule->isComputable()) {
+            return ApiResponse::success([
+                'rule'    => $this->payload($rule),
+                'period'  => ['start' => $start->toDateString(), 'end' => $end->toDateString()],
+                'entries' => [],
+                'source'  => [
+                    'live' => false,
+                    'note' => 'CP pairs and points are not tracked yet, so there is no board to show. The rewards below are what the app\'s CP Reward tab displays.',
+                ],
+            ]);
+        }
+
         return ApiResponse::success([
             'rule'    => $this->payload($rule),
             'period'  => ['start' => $start->toDateString(), 'end' => $end->toDateString()],
@@ -90,6 +102,10 @@ class RankingController extends Controller
     /** Freeze the board as the record for this period. */
     public function snapshot(Request $request, RankingRule $rule): JsonResponse
     {
+        if (! $rule->isComputable()) {
+            return ApiResponse::error('VALIDATION_ERROR', 'This board has no standings to snapshot yet.', null, 422);
+        }
+
         [$start, $end] = $this->leaderboards->periodFor($rule);
 
         $written = $this->leaderboards->snapshot($rule, $start, $end);
@@ -138,6 +154,10 @@ class RankingController extends Controller
     /** GFT-098 / A.9d — idempotent. Running it twice pays once. */
     public function payRewards(Request $request, RankingRule $rule): JsonResponse
     {
+        if (! $rule->isComputable()) {
+            return ApiResponse::error('VALIDATION_ERROR', 'This board has no standings, so there is nothing to pay yet.', null, 422);
+        }
+
         $data = $request->validate([
             'period_start' => ['sometimes', 'nullable', 'date'],
         ]);
@@ -278,12 +298,13 @@ class RankingController extends Controller
             ->get();
 
         $ranks = $others->pluck('rank_from')->filter(fn (int $r) => $r > $from)->push($from)->unique();
+        $max = RankingReward::maxPerRank($rule);
 
         foreach ($ranks as $rank) {
-            if ($others->filter(fn (RankingReward $r) => $r->covers($rank))->count() >= RankingReward::MAX_PER_RANK) {
+            if ($others->filter(fn (RankingReward $r) => $r->covers($rank))->count() >= $max) {
                 return ApiResponse::error(
                     'VALIDATION_ERROR',
-                    sprintf('Rank %d already has %d rewards — that is the most one rank can carry.', $rank, RankingReward::MAX_PER_RANK),
+                    sprintf('Rank %d already has %d rewards — that is the most one rank can carry.', $rank, $max),
                     ['full_rank' => $rank],
                     422,
                 );
@@ -324,8 +345,11 @@ class RankingController extends Controller
             'min_threshold' => $rule->min_threshold,
             'top_n'         => $rule->top_n,
             'is_active'     => $rule->is_active,
-            // Room and agency boards need modules that do not exist yet.
-            'computable'    => in_array($rule->board_type, ['wealth', 'charm'], true),
+            // Room and agency boards need modules that do not exist yet; CP has no pairs or
+            // points, so it only takes rewards (`rewards_only`).
+            'computable'    => $rule->isComputable(),
+            'rewards_only'  => $rule->board_type === 'cp',
+            'max_rewards_per_rank' => RankingReward::maxPerRank($rule),
         ];
     }
 }

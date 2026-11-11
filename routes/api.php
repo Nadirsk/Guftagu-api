@@ -64,6 +64,7 @@ use App\Http\Controllers\Api\RoomCatalogueController as ApiRoomCatalogueControll
 use App\Http\Controllers\Api\ProfileController as ApiProfileController;
 use App\Http\Controllers\Api\RoomChatController;
 use App\Http\Controllers\Api\RoomController as ApiRoomController;
+use App\Http\Controllers\Api\RoomEnvelopeController;
 use App\Http\Controllers\Api\RoomGiftController;
 use App\Http\Controllers\Api\RoomHostController;
 use App\Http\Controllers\Api\SearchController;
@@ -204,6 +205,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::get('users/{profile}/visitors', [VisitorController::class, 'index'])->name('users.visitors');
     Route::get('users/{profile}/posts', [PostController::class, 'forUser'])->name('users.posts');
     // ---- the Profile screen's counts and its Gift tab (Figma 676:4517 / 595:3620)
+    Route::get('users/{profile}', [ApiProfileController::class, 'show'])->name('users.show');
     Route::get('users/{profile}/stats', [ApiProfileController::class, 'stats'])->name('users.stats');
     Route::get('users/{profile}/gifts', [ApiProfileController::class, 'gifts'])->name('users.gifts');
 
@@ -237,6 +239,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::get('gifts', [ApiGiftController::class, 'index'])->name('gifts.index');
     Route::get('gifts/categories', [ApiGiftController::class, 'categories'])->name('gifts.categories');
     Route::get('wallet', [ApiWalletController::class, 'show'])->name('wallet.show');
+    Route::post('wallet/exchange', [ApiWalletController::class, 'exchange'])->name('wallet.exchange');
     Route::get('wallet/coins/transactions', [ApiWalletController::class, 'coinTransactions'])->name('wallet.coins.transactions');
     Route::get('wallet/diamonds/transactions', [ApiWalletController::class, 'diamondTransactions'])->name('wallet.diamonds.transactions');
     Route::get('recharge-packages', [RechargeController::class, 'packages'])->name('recharge-packages.index');
@@ -333,6 +336,11 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         // ---- gifting within this room (D.6a)
         Route::get('gifts', [RoomGiftController::class, 'index'])->name('gifts.index');
         Route::post('gifts', [RoomGiftController::class, 'store'])->name('gifts.store');
+
+        // ---- red packets in the room
+        Route::get('envelopes', [RoomEnvelopeController::class, 'index'])->name('envelopes.index');
+        Route::post('envelopes', [RoomEnvelopeController::class, 'store'])->name('envelopes.store');
+        Route::post('envelopes/{envelope}/claim', [RoomEnvelopeController::class, 'claim'])->name('envelopes.claim');
     });
 
     // ---- feedback (Me screen)

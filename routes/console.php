@@ -31,3 +31,8 @@ Schedule::command('hosts:evaluate-targets --quiet-on-none')->dailyAt('01:30')->w
 // Weekly Star — a round closes at whatever time of day its campaign started, so this
 // checks often rather than once a day; a round with nothing due is a cheap no-op.
 Schedule::command('events:settle-weekly-star --quiet-on-none')->everyFifteenMinutes()->withoutOverlapping();
+
+// Rich / Charm Weekly List — pays the Top 3 of the week that just closed. Idempotent, so
+// checking often costs nothing and a missed run is caught up on the next one. The admin
+// panel's manual Snapshot / Pay buttons still work alongside it.
+Schedule::command('rankings:settle-weekly --quiet-on-none')->everyFifteenMinutes()->withoutOverlapping();

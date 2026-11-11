@@ -48,9 +48,8 @@ class GiftSendService
             }
         }
 
-        if ($sender->id === $receiver->id) {
-            throw new GiftException('VALIDATION_ERROR', 'You cannot send a gift to yourself.', 422);
-        }
+        // Sending a gift to yourself is allowed, as in Mazag: you pay the coins and earn the
+        // diamonds back at the gift's diamond rate, so there is nothing to farm.
 
         if ($quantity < 1) {
             throw new GiftException('VALIDATION_ERROR', 'Quantity must be at least one.', 422);

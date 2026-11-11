@@ -39,24 +39,13 @@ class RankingController extends Controller
     public function me(Request $request): JsonResponse
     {
         $rule = $this->resolveRule($request);
-        $user = $request->user();
 
-        $column = $rule->metric === 'diamonds_earned' ? 'lifetime_diamonds_earned' : 'lifetime_coins_spent';
+        $standing = $this->leaderboards->standing($rule, $request->user()->id);
 
-        $myScore = DB::table('wallets')->where('user_id', $user->id)->value($column) ?? 0;
-
-        if ($myScore < max(1, $rule->min_threshold)) {
-            return ApiResponse::success(['rank' => null, 'score' => $myScore], 'Below the ranking threshold');
-        }
-
-        $rank = 1 + DB::table('wallets')
-            ->join('users', 'users.id', '=', 'wallets.user_id')
-            ->whereNull('users.deleted_at')
-            ->where('users.status', 'active')
-            ->where($column, '>', $myScore)
-            ->count();
-
-        return ApiResponse::success(['rank' => $rank, 'score' => $myScore]);
+        return ApiResponse::success(
+            $standing,
+            $standing['rank'] === null ? 'Below the ranking threshold' : 'OK',
+        );
     }
 
     /**
@@ -95,7 +84,8 @@ class RankingController extends Controller
     protected function resolveRule(Request $request): RankingRule
     {
         $data = $request->validate([
-            'board'  => ['sometimes', Rule::in(['wealth', 'charm'])],
+            // `cp` only has rewards (GET /rankings/rewards); its board and `me` come back empty.
+            'board'  => ['sometimes', Rule::in(['wealth', 'charm', 'cp'])],
             'period' => ['sometimes', Rule::in(RankingRule::PERIODS)],
         ]);
 

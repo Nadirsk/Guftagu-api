@@ -62,6 +62,12 @@ return [
     | FRONTEND_URL set still renders a valid link instead of an empty href.
     */
 
+    /*
+     * Diamond → coin exchange (the app's "Points" screen). How many diamonds buy one coin;
+     * 5 diamonds = 1 coin. Keep EXCHANGE_RATE in mobile ExchangeScreen.tsx the same.
+     */
+    'diamonds_per_coin' => (int) env('DIAMONDS_PER_COIN', 5),
+
     'frontend_url' => rtrim(env('FRONTEND_URL', env('APP_URL', 'http://localhost')), '/'),
 
 ];

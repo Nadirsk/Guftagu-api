@@ -76,7 +76,136 @@ class EventsRankingsTest extends TestCase
             'lifetime_diamonds_earned' => $diamondsEarned,
         ]);
 
+        // The boards read the room-gift ledger: Rich = sent, Charm = received.
+        if ($coinsSpent > 0) {
+            $this->roomGift($user->id, $this->counterparty()->id, $coinsSpent);
+        }
+        if ($diamondsEarned > 0) {
+            $this->roomGift($this->counterparty()->id, $user->id, $diamondsEarned);
+        }
+
         return $user;
+    }
+
+    #[Test]
+    public function daily_weekly_and_monthly_boards_only_count_their_own_window_and_only_room_gifts(): void
+    {
+        $user = $this->makeUser();
+        $cp = $this->counterparty();
+        $this->roomGift($user->id, $cp->id, 1); // seeds the shared room + gift
+        \Illuminate\Support\Facades\DB::table('gift_transactions')->delete();
+
+        $send = function (int $coins, Carbon $at, ?int $room) use ($user, $cp) {
+            \Illuminate\Support\Facades\DB::table('gift_transactions')->insert([
+                'sender_id' => $user->id, 'receiver_id' => $cp->id, 'room_id' => $room,
+                'gift_id' => $this->ledgerGiftId, 'quantity' => 1, 'coin_value' => $coins, 'created_at' => $at,
+            ]);
+        };
+
+        Carbon::setTestNow(Carbon::parse('2026-11-18 12:00:00')); // a Wednesday
+        $send(1000, now(), $this->ledgerRoomId);                      // today
+        $send(5000, now()->startOfWeek()->addHour(), $this->ledgerRoomId); // this week, not today
+        $send(20000, now()->startOfMonth()->addHour(), $this->ledgerRoomId); // this month, not this week
+        $send(900000, now(), null);                                   // a DM gift: never counts
+        $send(900000, now()->subMonths(2), $this->ledgerRoomId);      // long ago
+
+        $score = fn (string $period) => app(LeaderboardService::class)
+            ->board(RankingRule::where('key', "wealth_{$period}")->first())->first()['score'] ?? null;
+
+        $this->assertSame(1000, $score('daily'));
+        $this->assertSame(6000, $score('weekly'));
+        $this->assertSame(26000, $score('monthly'));
+
+        Carbon::setTestNow();
+    }
+
+    #[Test]
+    public function the_scheduled_job_pays_last_weeks_top_three_once_and_not_the_week_in_progress(): void
+    {
+        $rule = RankingRule::where('key', 'wealth_weekly')->first();
+        RankingReward::create(['rule_key' => $rule->key, 'rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'coins', 'reward_value' => 5_000]);
+        RankingReward::create(['rule_key' => $rule->key, 'rank_from' => 2, 'rank_to' => 3, 'reward_type' => 'coins', 'reward_value' => 2_000]);
+
+        Carbon::setTestNow(Carbon::parse('2026-11-11 12:00:00')); // Wednesday
+        $first = $this->makeUser(coinsSpent: 90_000);
+        $second = $this->makeUser(coinsSpent: 50_000);
+        $this->makeUser(coinsSpent: 20_000);
+        $fourth = $this->makeUser(coinsSpent: 10_000);
+
+        // Same week still running: nothing is due.
+        $this->artisan('rankings:settle-weekly', ['--quiet-on-none' => true])->assertSuccessful();
+        $this->assertSame(0, Wallet::where('user_id', $first->id)->value('coin_balance'));
+
+        // The week closes; the next Monday the job pays it.
+        Carbon::setTestNow(Carbon::parse('2026-11-16 00:15:00'));
+        $this->artisan('rankings:settle-weekly')->assertSuccessful();
+        $this->artisan('rankings:settle-weekly')->assertSuccessful(); // a re-run pays nothing more
+
+        $this->assertSame(5_000, Wallet::where('user_id', $first->id)->value('coin_balance'));
+        $this->assertSame(2_000, Wallet::where('user_id', $second->id)->value('coin_balance'));
+        $this->assertSame(0, Wallet::where('user_id', $fourth->id)->value('coin_balance'));
+
+        Carbon::setTestNow();
+    }
+
+    #[Test]
+    public function cp_takes_four_rewards_per_place_and_serves_them_but_is_never_ranked_or_paid(): void
+    {
+        $rule = RankingRule::where('key', 'cp_weekly')->first();
+        $this->assertNotNull($rule);
+        $this->assertFalse($rule->isComputable());
+
+        $this->actingAs($this->superAdmin, 'sanctum-admin');
+        $url = "/api/v1/admin/ranking-rules/{$rule->id}/rewards";
+
+        foreach ([1000, 2000, 3000, 4000] as $coins) {
+            $this->postJson($url, ['rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'coins', 'reward_value' => $coins])->assertSuccessful();
+        }
+        // A fifth on the same place is refused: the CP Reward card has four slots.
+        $this->postJson($url, ['rank_from' => 1, 'rank_to' => 1, 'reward_type' => 'coins', 'reward_value' => 5000])->assertStatus(422);
+        $this->postJson($url, ['rank_from' => 6, 'rank_to' => 10, 'reward_type' => 'coins', 'reward_value' => 100])->assertSuccessful();
+
+        // Nothing to rank, snapshot or pay.
+        $this->getJson("/api/v1/admin/ranking-rules/{$rule->id}/board")->assertSuccessful()->assertJsonPath('data.entries', []);
+        $this->postJson("/api/v1/admin/ranking-rules/{$rule->id}/snapshot")->assertStatus(422);
+        $this->artisan('rankings:settle-weekly', ['--quiet-on-none' => true])->assertSuccessful();
+        $this->assertSame(0, LeaderboardSnapshot::where('rule_key', 'cp_weekly')->count());
+
+        // The app reads them.
+        $user = $this->makeUser();
+        Sanctum::actingAs($user, ['*']);
+        $rewards = $this->getJson('/api/v1/rankings/rewards?board=cp&period=weekly')->assertSuccessful()->json('data.rewards');
+        $this->assertCount(5, $rewards);
+    }
+
+    protected ?User $counterpartyUser = null;
+    protected ?int $ledgerRoomId = null;
+    protected ?int $ledgerGiftId = null;
+
+    protected function counterparty(): User
+    {
+        // Created without a wallet row so it never appears on a board itself.
+        return $this->counterpartyUser ??= User::create([
+            'guftagu_id' => 'GFCP00001', 'phone' => '+919820499999',
+            'status' => User::STATUS_SUSPENDED, 'agora_uid' => 499999,
+        ]);
+    }
+
+    protected function roomGift(int $senderId, int $receiverId, int $coins): void
+    {
+        $this->ledgerRoomId ??= \App\Models\Room::create([
+            'room_code' => 'RCLEDGER1', 'owner_id' => $this->counterparty()->id,
+            'category_id' => \App\Models\RoomCategory::create(['key' => 'ledger', 'name_en' => 'Ledger', 'sort_order' => 1])->id,
+            'name' => 'Ledger', 'seat_count' => 5, 'status' => \App\Models\Room::LIVE,
+        ])->id;
+        $this->ledgerGiftId ??= \App\Models\Gift::create([
+            'code' => 'ledger', 'name_en' => 'Ledger', 'coin_price' => 1, 'diamond_value' => 1, 'tier' => 'basic',
+        ])->id;
+
+        \App\Models\GiftTransaction::create([
+            'sender_id' => $senderId, 'receiver_id' => $receiverId, 'room_id' => $this->ledgerRoomId,
+            'gift_id' => $this->ledgerGiftId, 'quantity' => 1, 'coin_value' => $coins,
+        ]);
     }
 
     protected function makeEvent(array $attributes = []): Event

@@ -40,21 +40,20 @@ class LeaderboardService
      *
      * @return Collection<int, array{rank: int, entity_id: int, score: int, display_name: ?string, guftagu_id: ?string}>
      */
-    public function board(RankingRule $rule): Collection
+    public function board(RankingRule $rule, ?Carbon $at = null): Collection
     {
-        $column = match ($rule->metric) {
-            'coins_spent'     => 'wallets.lifetime_coins_spent',
-            'diamonds_earned' => 'wallets.lifetime_diamonds_earned',
-            default           => 'wallets.lifetime_coins_spent',
-        };
+        // A board nothing can be computed for (CP) has no standings rather than a wrong one.
+        if (! $rule->isComputable()) {
+            return collect();
+        }
 
-        return DB::table('wallets')
-            ->join('users', 'users.id', '=', 'wallets.user_id')
+        return $this->scores($rule, $at)
+            ->join('users', 'users.id', '=', 'g.user_id')
             ->leftJoin('user_profiles', 'user_profiles.user_id', '=', 'users.id')
             ->whereNull('users.deleted_at')
             ->where('users.status', User::STATUS_ACTIVE)
-            ->where($column, '>=', max(1, $rule->min_threshold))
-            ->orderByDesc($column)
+            ->where('g.score', '>=', max(1, $rule->min_threshold))
+            ->orderByDesc('g.score')
             ->orderBy('users.id')          // a stable tiebreak, so the board does not shuffle
             ->limit($rule->top_n)
             ->get([
@@ -63,7 +62,7 @@ class LeaderboardService
                 'user_profiles.display_name',
                 'user_profiles.avatar_url',
                 'user_profiles.gender',
-                DB::raw("{$column} AS score"),
+                'g.score',
             ])
             ->values()
             ->map(fn ($row, $index) => [
@@ -74,6 +73,55 @@ class LeaderboardService
                 'display_name' => $row->display_name,
                 'avatar_url'   => $row->avatar_url ?: UserProfile::defaultAvatarUrl($row->gender, $row->entity_id),
             ]);
+    }
+
+    /**
+     * Per-user totals for the rule's current period, as a derived table `g(user_id, score)`.
+     *
+     * Rich (`coins_spent`) = coin value of room gifts the user SENT; Charm
+     * (`diamonds_earned`) = coin value of room gifts the user RECEIVED. Only room gifts
+     * count (`room_id` set); the window is the rule's current day / week / month, and
+     * `all_time` has none.
+     */
+    protected function scores(RankingRule $rule, ?Carbon $at = null): \Illuminate\Database\Query\Builder
+    {
+        $side = $rule->metric === 'diamonds_earned' ? 'receiver_id' : 'sender_id';
+
+        $inner = DB::table('gift_transactions')
+            ->whereNotNull('room_id')
+            ->selectRaw("{$side} AS user_id, SUM(coin_value) AS score")
+            ->groupBy($side);
+
+        if ($rule->period !== 'all_time') {
+            // `$at` picks the period that contains it — how a finished week is rebuilt.
+            [$start, $end] = $this->periodFor($rule, $at);
+            $inner->whereBetween('created_at', [$start, $end]);
+        }
+
+        return DB::query()->fromSub($inner, 'g');
+    }
+
+    /** @return array{rank: ?int, score: int} the user's place on the rule's current board. */
+    public function standing(RankingRule $rule, int $userId): array
+    {
+        if (! $rule->isComputable()) {
+            return ['rank' => null, 'score' => 0];
+        }
+
+        $score = (int) ($this->scores($rule)->where('g.user_id', $userId)->value('g.score') ?? 0);
+
+        if ($score < max(1, $rule->min_threshold)) {
+            return ['rank' => null, 'score' => $score];
+        }
+
+        $ahead = $this->scores($rule)
+            ->join('users', 'users.id', '=', 'g.user_id')
+            ->whereNull('users.deleted_at')
+            ->where('users.status', User::STATUS_ACTIVE)
+            ->where('g.score', '>', $score)
+            ->count();
+
+        return ['rank' => 1 + $ahead, 'score' => $score];
     }
 
     /**
@@ -89,7 +137,8 @@ class LeaderboardService
     {
         [$start, $end] = $this->periodFor($rule, $periodStart, $periodEnd);
 
-        $board = $this->board($rule);
+        // The board of the period being frozen — not necessarily the current one.
+        $board = $this->board($rule, $periodStart ?? $start);
 
         return DB::transaction(function () use ($rule, $board, $start, $end) {
             LeaderboardSnapshot::query()
@@ -122,7 +171,7 @@ class LeaderboardService
      *
      * @return array{paid: int, skipped: int, total_value: int}
      */
-    public function payRewards(RankingRule $rule, Carbon $periodStart, AdminUser $actor): array
+    public function payRewards(RankingRule $rule, Carbon $periodStart, ?AdminUser $actor = null): array
     {
         $snapshots = LeaderboardSnapshot::query()
             ->where('rule_key', $rule->key)
@@ -193,9 +242,15 @@ class LeaderboardService
 
                         $memo = "Ranking reward: {$rule->key} rank {$snapshot->rank}";
 
+                        // An admin's manual pay is audited as theirs; the scheduled job has no
+                        // admin, so it credits as the system, keyed to the payout row.
+                        $credit = fn (string $currency) => $actor !== null
+                            ? $this->wallets->adjust($user, $currency, 'credit', $reward->reward_value, $memo, $actor)
+                            : $this->wallets->creditSystem($user, $currency, $reward->reward_value, 'ranking_reward', "ranking_reward:{$payout->id}");
+
                         $transactionId = match ($reward->reward_type) {
-                            'coins'    => $this->wallets->adjust($user, 'coin', 'credit', $reward->reward_value, $memo, $actor)->uuid,
-                            'diamonds' => $this->wallets->adjust($user, 'diamond', 'credit', $reward->reward_value, $memo, $actor)->uuid,
+                            'coins'    => $credit('coin')->uuid,
+                            'diamonds' => $credit('diamond')->uuid,
                             default    => null,
                         };
 
