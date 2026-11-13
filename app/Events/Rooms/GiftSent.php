@@ -23,7 +23,6 @@ class GiftSent implements ShouldBroadcastNow
         public Gift $gift,
         public User $sender,
         public User $receiver,
-        public int $comboCount,
         public ?string $batch = null,
     ) {
     }
@@ -55,7 +54,6 @@ class GiftSent implements ShouldBroadcastNow
                 'duration_ms'    => $this->gift->duration_ms,
             ],
             'quantity'    => $this->transaction->quantity,
-            'combo_count' => $this->comboCount,
             'batch'       => $this->batch,
             'coin_value'  => $this->transaction->coin_value,
         ];

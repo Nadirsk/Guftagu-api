@@ -29,10 +29,16 @@ class RoomHostController extends Controller
      * The one room a user keeps: their newest room that moderation has not closed.
      * Party → Create My Room opens it instead of the create screen once it exists.
      */
-    public static function ownRoom(User $user): ?Room
+    public static function ownRoom(User $user, string $kind = Room::KIND_VOICE): ?Room
     {
         return Room::query()
             ->where('owner_id', $user->id)
+            ->when(
+                $kind === Room::KIND_VOICE,
+                fn ($q) => $q->where('kind', Room::KIND_VOICE),
+                // A live video is not kept: you start a new one each time, so only one at once.
+                fn ($q) => $q->whereIn('kind', [Room::KIND_VIDEO, Room::KIND_VIDEO_PARTY]),
+            )
             ->whereNotIn('status', [Room::CLOSED, Room::FORCE_CLOSED])
             ->latest('id')
             ->first();
@@ -41,7 +47,7 @@ class RoomHostController extends Controller
     /** GET /rooms/mine — `{room: {uuid, room_code, name, cover_url, status} | null}`. */
     public function mine(Request $request): JsonResponse
     {
-        $room = static::ownRoom($request->user());
+        $room = static::ownRoom($request->user(), $request->query('kind') === 'video' ? Room::KIND_VIDEO : Room::KIND_VOICE);
 
         return ApiResponse::success(['room' => $room === null ? null : [
             'uuid'      => $room->uuid,
@@ -49,6 +55,7 @@ class RoomHostController extends Controller
             'name'      => $room->name,
             'cover_url' => $room->cover_url,
             'status'    => $room->status,
+            'kind'      => $room->kind,
         ]]);
     }
 
@@ -58,12 +65,14 @@ class RoomHostController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $existing = static::ownRoom($request->user());
+        $kind = $request->input('kind', Room::KIND_VOICE);
+        $existing = static::ownRoom($request->user(), $kind);
         if ($existing !== null) {
-            return ApiResponse::error('ROOM_EXISTS', 'You already have a room.', ['uuid' => $existing->uuid], 409);
+            return ApiResponse::error('ROOM_EXISTS', 'You already have a room.', ['uuid' => $existing->uuid, 'kind' => $existing->kind], 409);
         }
 
         $data = $request->validate([
+            'kind'             => ['sometimes', Rule::in([Room::KIND_VOICE, Room::KIND_VIDEO, Room::KIND_VIDEO_PARTY])],
             'name'             => ['required', 'string', 'max:80'],
             'description'      => ['sometimes', 'nullable', 'string', 'max:300'],
             'cover_url'        => ['sometimes', 'nullable', 'url', 'max:500'],
@@ -73,7 +82,7 @@ class RoomHostController extends Controller
             'category_id'      => ['sometimes', 'nullable', 'integer'],
             'theme_id'         => ['sometimes', 'nullable', 'integer'],
             'seat_template_id' => ['sometimes', 'nullable', 'integer'],
-            'seat_count'       => ['sometimes', 'integer', 'min:2', 'max:50'],
+            'seat_count'       => ['sometimes', 'integer', 'min:1', 'max:50'],
             'visibility'       => ['sometimes', Rule::in(['public', 'private'])],
             'password'         => ['sometimes', 'nullable', 'string', 'min:4', 'max:100'],
             'video_enabled'    => ['sometimes', 'boolean'],
@@ -89,7 +98,14 @@ class RoomHostController extends Controller
             'visibility'    => $room->visibility,
             'seat_count'    => $room->seat_count,
             'video_enabled' => $room->video_enabled,
+            'kind'          => $room->kind,
         ], 'Room published', 201);
+    }
+
+    /** POST /rooms/{room}/end — the host ends a live video; answers the summary the end screen shows. */
+    public function end(Request $request, Room $room): JsonResponse
+    {
+        return ApiResponse::success($this->host->endLive($room, $request->user()), 'Live ended');
     }
 
     /** PATCH /rooms/{room}/mode — `{seat_template_id}`; every seat is emptied. */
@@ -172,6 +188,22 @@ class RoomHostController extends Controller
         $this->host->kickMember($room, $request->user(), $profile, (int) $data['minutes']);
 
         return ApiResponse::success(null, 'Kicked out');
+    }
+
+    /** POST /rooms/{room}/members/{profile}/block — out of the room and on its block list, with no end. */
+    public function blockMember(Request $request, Room $room, User $profile): JsonResponse
+    {
+        $this->host->blockMember($room, $request->user(), $profile);
+
+        return ApiResponse::success(null, 'Added to block list');
+    }
+
+    /** GET /rooms/{room}/listeners — in the room, not on a mic: who "Take on the Mic" can seat. */
+    public function listeners(Request $request, Room $room): JsonResponse
+    {
+        return ApiResponse::success(
+            $this->host->listeners($room, $request->user())->map(fn (User $u) => \App\Support\SocialPresenter::user($u))->all()
+        );
     }
 
     /** PATCH /rooms/{room}/seats/{seat}/lock — `{locked: bool}`. */

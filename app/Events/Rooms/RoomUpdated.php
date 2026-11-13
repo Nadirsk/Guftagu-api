@@ -20,6 +20,9 @@ class RoomUpdated implements ShouldBroadcastNow
 
     public const THEME = 'theme';
 
+    /** The host ended a live video: viewers leave, the host sees the summary. */
+    public const CLOSED = 'closed';
+
     public function __construct(
         public Room $room,
         public string $reason,

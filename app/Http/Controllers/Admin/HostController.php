@@ -43,7 +43,7 @@ class HostController extends Controller
         ]);
 
         $query = HostApplication::query()
-            ->with(['user:id,guftagu_id', 'user.profile:id,user_id,display_name,avatar_url,gender', 'agency:id,name,code', 'reviewer:id,name'])
+            ->with(['user:id,guftagu_id', 'user.profile:id,user_id,display_name,avatar_url,gender,country', 'agency:id,name,code', 'reviewer:id,name'])
             ->when(
                 array_key_exists('status', $data) && $data['status'] !== null,
                 fn ($q) => $q->where('status', $data['status']),
@@ -125,7 +125,7 @@ class HostController extends Controller
         ]);
 
         $query = Host::query()
-            ->with(['user:id,guftagu_id', 'user.profile:id,user_id,display_name,avatar_url,gender', 'agency:id,name,code'])
+            ->with(['user:id,guftagu_id', 'user.profile:id,user_id,display_name,avatar_url,gender,country', 'agency:id,name,code'])
             ->when($data['status'] ?? null, fn ($q, string $s) => $q->where('status', $s))
             ->when($data['agency_id'] ?? null, fn ($q, int $a) => $q->where('agency_id', $a))
             ->when($request->boolean('unassigned'), fn ($q) => $q->whereNull('agency_id'))
@@ -158,7 +158,7 @@ class HostController extends Controller
 
         [$from, $to] = $this->range($data);
 
-        $host->load(['user:id,guftagu_id', 'user.profile:id,user_id,display_name,avatar_url,gender', 'agency:id,name,code', 'approver:id,name']);
+        $host->load(['user:id,guftagu_id', 'user.profile:id,user_id,display_name,avatar_url,gender,country', 'agency:id,name,code', 'approver:id,name']);
 
         $daily = HostEarning::query()
             ->where('host_id', $host->id)

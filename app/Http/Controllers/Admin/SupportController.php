@@ -75,7 +75,7 @@ class SupportController extends Controller
     public function show(SupportTicket $ticket): JsonResponse
     {
         $ticket->load([
-            'user:id,guftagu_id', 'user.profile:id,user_id,display_name,avatar_url,gender',
+            'user:id,guftagu_id', 'user.profile:id,user_id,display_name,avatar_url,gender,country',
             'assignee:id,name', 'escalatedTo:id,name', 'resolver:id,name', 'messages',
         ]);
 

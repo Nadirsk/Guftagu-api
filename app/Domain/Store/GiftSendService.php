@@ -9,7 +9,6 @@ use App\Models\GiftTransaction;
 use App\Models\Room;
 use App\Models\User;
 use App\Models\Wallet;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -21,9 +20,6 @@ use Illuminate\Support\Facades\DB;
  */
 class GiftSendService
 {
-    /** A repeat tap within this window counts toward the same combo (client-facing only, not stored as a group). */
-    protected const COMBO_WINDOW_SECONDS = 10;
-
     public function __construct(
         protected WalletService $wallets,
         protected InventoryService $inventory,
@@ -39,12 +35,12 @@ class GiftSendService
         ?Room $room = null,
         ?string $idempotencyKey = null,
         ?string $batch = null,
-    ): array {
+    ): GiftTransaction {
         if ($idempotencyKey !== null) {
             $existing = GiftTransaction::where('idempotency_key', $idempotencyKey)->first();
 
             if ($existing !== null) {
-                return [$existing, $this->comboCount($sender, $gift, $room, $existing->created_at)];
+                return $existing;
             }
         }
 
@@ -101,27 +97,14 @@ class GiftSendService
             ]);
         });
 
-        $combo = $this->comboCount($sender, $gift, $room, $transaction->created_at);
-
         if ($room !== null) {
             try {
-                GiftSent::dispatch($room, $transaction, $gift, $sender, $receiver, $combo, $batch);
+                GiftSent::dispatch($room, $transaction, $gift, $sender, $receiver, $batch);
             } catch (\Throwable $e) {
                 report($e);
             }
         }
 
-        return [$transaction, $combo];
-    }
-
-    /** How many of this same gift this sender has sent in this room in the last few seconds. */
-    protected function comboCount(User $sender, Gift $gift, ?Room $room, Carbon $asOf): int
-    {
-        return GiftTransaction::query()
-            ->where('sender_id', $sender->id)
-            ->where('gift_id', $gift->id)
-            ->when($room !== null, fn ($q) => $q->where('room_id', $room->id), fn ($q) => $q->whereNull('room_id'))
-            ->where('created_at', '>=', $asOf->copy()->subSeconds(self::COMBO_WINDOW_SECONDS))
-            ->count();
+        return $transaction;
     }
 }

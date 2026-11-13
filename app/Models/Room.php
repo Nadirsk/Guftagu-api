@@ -19,8 +19,12 @@ class Room extends Model
     public const CLOSED = 'closed';
     public const FORCE_CLOSED = 'force_closed';
 
+    public const KIND_VOICE = 'voice';
+    public const KIND_VIDEO = 'video';
+    public const KIND_VIDEO_PARTY = 'video_party';
+
     protected $fillable = [
-        'uuid', 'room_code', 'owner_id', 'category_id', 'theme_id', 'name', 'description',
+        'uuid', 'room_code', 'kind', 'call_voice_price', 'call_video_price', 'call_sound', 'owner_id', 'category_id', 'theme_id', 'name', 'description',
         'cover_url', 'background_url', 'announcement', 'visibility', 'password_hash', 'seat_count',
         'seat_layout', 'seat_template_id', 'video_enabled', 'status', 'is_featured', 'is_pinned',
         'featured_until', 'listener_count', 'peak_listeners', 'total_diamonds_received',
@@ -28,6 +32,12 @@ class Room extends Model
     ];
 
     protected $hidden = ['password_hash'];
+
+    /** A solo live video or a Video Party — anything that is not the Party tab's voice room. */
+    public function isVideo(): bool
+    {
+        return in_array($this->kind, [self::KIND_VIDEO, self::KIND_VIDEO_PARTY], true);
+    }
 
     public function uniqueIds(): array
     {

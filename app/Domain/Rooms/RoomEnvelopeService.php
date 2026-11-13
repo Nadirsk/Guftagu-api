@@ -136,14 +136,14 @@ class RoomEnvelopeService
             ->where('remaining_count', '>', 0)
             ->where('sender_id', '!=', $viewer->id)
             ->whereDoesntHave('claims', fn ($q) => $q->where('user_id', $viewer->id))
-            ->with('sender.profile:id,user_id,display_name,avatar_url,gender')
+            ->with('sender.profile:id,user_id,display_name,avatar_url,gender,country')
             ->orderBy('id')
             ->get();
     }
 
     public function claimsOf(RoomRedEnvelope $envelope)
     {
-        return $envelope->claims()->with('user.profile:id,user_id,display_name,avatar_url,gender')->orderBy('id')->get();
+        return $envelope->claims()->with('user.profile:id,user_id,display_name,avatar_url,gender,country')->orderBy('id')->get();
     }
 
     /** Random share: 1 .. about twice the average, always leaving one coin for each person still to come. */

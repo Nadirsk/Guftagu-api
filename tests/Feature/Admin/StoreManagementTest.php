@@ -171,9 +171,11 @@ class StoreManagementTest extends TestCase
             ])
             ->assertOk();
 
+        // Gift::thumbnailUrl() makes root-relative paths absolute on read, so the stored value is
+        // the relative $url while the API payload carries the absolute form of the same path.
         $url = $response->json('data.url');
-        $this->assertSame($url, $response->json('data.gift.thumbnail_url'));
-        $this->assertSame($url, $gift->fresh()->thumbnail_url);
+        $this->assertStringEndsWith($url, $response->json('data.gift.thumbnail_url'));
+        $this->assertSame($url, $gift->fresh()->getRawOriginal('thumbnail_url'));
         $this->assertTrue(AuditLog::where('action', 'gift.update')->where('entity_id', $gift->id)->exists());
     }
 

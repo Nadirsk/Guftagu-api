@@ -186,7 +186,7 @@ class RoomModerationService
             throw new RoomException('BAD_REQUEST', 'That user is not currently in this room.', 400);
         }
 
-        return DB::transaction(function () use ($room, $member, $target, $reentryBlockMinutes, $reason, $actor) {
+        $sanction = DB::transaction(function () use ($room, $member, $target, $reentryBlockMinutes, $reason, $actor) {
             $member->forceFill([
                 'is_active'        => false,
                 'left_at'          => now(),
@@ -228,6 +228,16 @@ class RoomModerationService
 
             return $sanction;
         });
+
+        // Tell the kicked person's app, which is still on the room screen. Best effort: the
+        // kick has committed, and their next /state poll answers 403 with the same words.
+        try {
+            \App\Events\Rooms\MemberKicked::dispatch($room, $target, 'staff', $reentryBlockMinutes, $room->activeMembers()->count());
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return $sanction;
     }
 
     /**

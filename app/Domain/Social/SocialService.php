@@ -157,7 +157,7 @@ class SocialService
     {
         $query = User::query()
             ->where('status', '!=', User::STATUS_DELETED)
-            ->with('profile:id,user_id,display_name,avatar_url,gender')
+            ->with('profile:id,user_id,display_name,avatar_url,gender,country')
             ->whereIn('id', $this->mutualFollowIds($user->id));
 
         return $this->excludeBlocked($query, $user->id)
@@ -247,7 +247,7 @@ class SocialService
     {
         return Block::query()
             ->where('blocker_id', $user->id)
-            ->with(['blocked.profile:id,user_id,display_name,avatar_url,gender'])
+            ->with(['blocked.profile:id,user_id,display_name,avatar_url,gender,country'])
             ->latest('id')
             ->paginate(perPage: $perPage, page: $page);
     }

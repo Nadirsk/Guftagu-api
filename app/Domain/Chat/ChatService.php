@@ -71,6 +71,24 @@ class ChatService
             $existing = $this->findDirect($actor->id, $other->id);
 
             if ($existing !== null) {
+                // Someone who deleted this chat and opens it again (from a profile card, a
+                // follower list …) is back in it with an empty thread: the history they cleared
+                // stays cleared, the same as when the other person writes to them again.
+                $mine = ConversationParticipant::query()
+                    ->where('conversation_id', $existing->id)
+                    ->where('user_id', $actor->id)
+                    ->whereNotNull('left_at')
+                    ->first();
+
+                if ($mine !== null) {
+                    $lastId = (int) Message::where('conversation_id', $existing->id)->max('id');
+                    $mine->forceFill([
+                        'left_at'                   => null,
+                        'cleared_before_message_id' => $lastId ?: null,
+                        'unread_count'              => 0,
+                    ])->save();
+                }
+
                 return $existing;
             }
 
@@ -168,7 +186,7 @@ class ChatService
             ->whereNull('left_at')
             ->with([
                 'conversation',
-                'conversation.activeParticipants.user.profile:id,user_id,display_name,avatar_url,gender',
+                'conversation.activeParticipants.user.profile:id,user_id,display_name,avatar_url,gender,country',
             ])
             ->join('conversations', 'conversations.id', '=', 'conversation_participants.conversation_id')
             ->where('conversations.is_active', true)
@@ -203,7 +221,7 @@ class ChatService
 
         return Message::query()
             ->whereIn('id', $ids)
-            ->with(['sender.profile:id,user_id,display_name,avatar_url,gender', 'replyTo:id,uuid'])
+            ->with(['sender.profile:id,user_id,display_name,avatar_url,gender,country', 'replyTo:id,uuid'])
             ->get()
             ->keyBy('conversation_id')
             ->all();
@@ -363,7 +381,7 @@ class ChatService
 
         $query = Message::query()
             ->where('conversation_id', $conversation->id)
-            ->with(['sender.profile:id,user_id,display_name,avatar_url,gender', 'replyTo:id,uuid'])
+            ->with(['sender.profile:id,user_id,display_name,avatar_url,gender,country', 'replyTo:id,uuid'])
             // "Delete for me" — MySQL's JSON_CONTAINS over the array of user ids. The column
             // is null for the overwhelming majority of rows, hence the null guard first.
             ->where(fn ($q) => $q

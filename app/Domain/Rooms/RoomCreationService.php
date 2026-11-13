@@ -71,12 +71,30 @@ class RoomCreationService
             throw new RoomException('VALIDATION_ERROR', 'A password is required for a private room.', 422);
         }
 
-        $seatCount = $template?->total_seats ?? (int) ($data['seat_count'] ?? 8);
-        $vipPositions = $template?->vip_positions ?? [];
+        $kind = $data['kind'] ?? Room::KIND_VOICE;
 
-        return DB::transaction(function () use ($owner, $data, $category, $theme, $template, $visibility, $seatCount, $vipPositions) {
+        if ($kind === Room::KIND_VOICE) {
+            $seatCount = $template?->total_seats ?? (int) ($data['seat_count'] ?? 8);
+            $vipPositions = $template?->vip_positions ?? [];
+        } elseif ($kind === Room::KIND_VIDEO) {
+            // Solo live: the host's stage is the only seat; everyone else watches.
+            $seatCount = 1;
+            $vipPositions = [];
+        } else {
+            // Video Party: the app offers 4, 6 or 9 camera tiles, the host holds the first.
+            $seatCount = (int) ($data['seat_count'] ?? 4);
+
+            if (! in_array($seatCount, [4, 6, 9], true)) {
+                throw new RoomException('VALIDATION_ERROR', 'A Video Party has 4, 6 or 9 seats.', 422);
+            }
+
+            $vipPositions = [];
+        }
+
+        return DB::transaction(function () use ($owner, $data, $category, $theme, $template, $visibility, $seatCount, $vipPositions, $kind) {
             $room = Room::create([
                 'room_code'        => $this->generateRoomCode(),
+                'kind'             => $kind,
                 'owner_id'         => $owner->id,
                 'category_id'      => $category?->id,
                 'theme_id'         => $theme?->id,
@@ -89,7 +107,7 @@ class RoomCreationService
                 'visibility'       => $visibility,
                 'password_hash'    => $visibility === 'private' ? Hash::make($data['password']) : null,
                 'seat_count'       => $seatCount,
-                'video_enabled'    => (bool) ($data['video_enabled'] ?? false),
+                'video_enabled'    => $kind !== Room::KIND_VOICE || (bool) ($data['video_enabled'] ?? false),
                 'status'           => Room::LIVE,
                 'started_at'       => now(),
             ]);
@@ -113,8 +131,10 @@ class RoomCreationService
             // A host publishing a room is hosting it — seated on the floor from the start,
             // not standing in an empty room they have to then take a seat in themselves.
             $room->seats()->where('seat_number', 1)->update([
-                'user_id'     => $owner->id,
-                'occupied_at' => now(),
+                'user_id'      => $owner->id,
+                'occupied_at'  => now(),
+                // On a video the host is on camera the moment the room exists.
+                'is_camera_on' => $kind !== Room::KIND_VOICE,
             ]);
 
             return $room->fresh(['owner.profile', 'category', 'theme', 'seats']);

@@ -95,6 +95,10 @@ class PermissionSeeder extends Seeder
             'view'   => ['View the daily check-in reward ladder', 'low'],
             'manage' => ['Manage the daily check-in reward ladder', 'medium'],
         ],
+        'wheel' => [
+            'view'   => ['View the Lucky Wheel prizes and odds', 'low'],
+            'manage' => ['Manage the Lucky Wheel prizes, odds and prices', 'high'],
+        ],
         'economy' => [
             'rates_manage'      => ['Manage conversion rates', 'high'],
             'packages_manage'   => ['Manage recharge packages', 'medium'],

@@ -233,7 +233,7 @@ class ConversationController extends Controller
 
     protected function present(Conversation $conversation, User $me): array
     {
-        $conversation->load('activeParticipants.user.profile:id,user_id,display_name,avatar_url,gender');
+        $conversation->load('activeParticipants.user.profile:id,user_id,display_name,avatar_url,gender,country');
 
         $mine = $conversation->activeParticipants
             ->firstWhere('user_id', $me->id);

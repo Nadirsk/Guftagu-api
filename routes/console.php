@@ -10,6 +10,9 @@ use Illuminate\Support\Facades\Schedule;
 | `schedule:run` every minute in production (docs/07).
 */
 
+// Closed or killed apps leave their voice room and mic. The rooms API also does this lazily.
+Schedule::command('rooms:evict-stale --quiet-on-none')->everyMinute()->withoutOverlapping();
+
 // GFT-018 — the dashboard reads this, so it has to be current before anyone looks.
 Schedule::command('stats:rollup')->dailyAt('00:20')->withoutOverlapping();
 

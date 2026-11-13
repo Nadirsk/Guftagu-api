@@ -9729,6 +9729,395 @@
                 ]
             }
         },
+        "/admin/lucky-wheels": {
+            "get": {
+                "tags": [
+                    "Lucky Wheel"
+                ],
+                "summary": "List both lucky wheels with their slots, chances and spin totals",
+                "description": "Returns the Classic and Glory wheels. `payout_rate` is the expected coins returned per coin spent. `totals` sums every spin ever made on the wheel.",
+                "operationId": "87d17983237eafb596dd58fb97019510",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/LuckyWheelAdmin"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `wheel.view`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/lucky-wheels/{wheel}": {
+            "patch": {
+                "tags": [
+                    "Lucky Wheel"
+                ],
+                "summary": "Update a wheel: name, prices and on/off",
+                "description": "Every field is optional. Prices are integer coins. Writes an audit log entry (`lucky_wheel.update`).",
+                "operationId": "9e96bb7253130e35d3e7ae91a7d68d3b",
+                "parameters": [
+                    {
+                        "name": "wheel",
+                        "in": "path",
+                        "description": "Wheel id",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Classic",
+                                        "maxLength": 60
+                                    },
+                                    "spin_cost": {
+                                        "type": "integer",
+                                        "example": 100,
+                                        "maximum": 10000000,
+                                        "minimum": 1
+                                    },
+                                    "multi_count": {
+                                        "type": "integer",
+                                        "example": 10,
+                                        "maximum": 100,
+                                        "minimum": 2
+                                    },
+                                    "multi_cost": {
+                                        "type": "integer",
+                                        "example": 900,
+                                        "maximum": 1000000000,
+                                        "minimum": 1
+                                    },
+                                    "is_active": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Wheel updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/LuckyWheelAdmin"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `wheel.manage`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "`NOT_FOUND` — no such wheel",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_FAILED` — a field is out of range",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/lucky-wheels/{wheel}/prizes/{position}": {
+            "put": {
+                "tags": [
+                    "Lucky Wheel"
+                ],
+                "summary": "Save one of the eight slots of a wheel",
+                "description": "Slots are fixed positions 1–8 round the wheel, so a slot is saved in place: it is created on\nfirst save and overwritten after that. It is never added or removed.\n\n- For `coins` and `diamonds`, `reward_value` is required and is the amount paid.\n- For item types, `store_item_id` must point at a store item of that exact type. `reward_value`\n  is forced to `1` and `duration_days` is optional.\n- Any other type clears `store_item_id` and `duration_days`.\n\nWrites an audit log entry (`lucky_wheel.prize_save`).",
+                "operationId": "ab7c1ff74177c0d871fed29572ae7759",
+                "parameters": [
+                    {
+                        "name": "wheel",
+                        "in": "path",
+                        "description": "Wheel id",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "position",
+                        "in": "path",
+                        "description": "Slot number, 1–8",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 8,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "reward_type",
+                                    "weight"
+                                ],
+                                "properties": {
+                                    "label": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "maxLength": 40
+                                    },
+                                    "reward_type": {
+                                        "description": "One of the types in LuckyWheelPrize::types()",
+                                        "type": "string",
+                                        "example": "coins"
+                                    },
+                                    "reward_value": {
+                                        "description": "Required for coins and diamonds",
+                                        "type": "integer",
+                                        "nullable": true,
+                                        "maximum": 1000000000,
+                                        "minimum": 1
+                                    },
+                                    "store_item_id": {
+                                        "description": "Required for item reward types",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "duration_days": {
+                                        "type": "integer",
+                                        "nullable": true,
+                                        "maximum": 3650,
+                                        "minimum": 1
+                                    },
+                                    "icon_url": {
+                                        "description": "From POST /admin/lucky-wheels/icon",
+                                        "type": "string",
+                                        "format": "uri",
+                                        "nullable": true,
+                                        "maxLength": 500
+                                    },
+                                    "weight": {
+                                        "description": "Relative chance in the draw; 0 means never drawn",
+                                        "type": "integer",
+                                        "maximum": 1000000,
+                                        "minimum": 0
+                                    },
+                                    "is_active": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Slot saved; returns the whole wheel",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/LuckyWheelAdmin"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `wheel.manage`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "`NOT_FOUND` — no such wheel, or position outside 1–8",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_FAILED` — bad reward type, or `store_item_id` is missing or of the wrong type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/lucky-wheels/icon": {
+            "post": {
+                "tags": [
+                    "Lucky Wheel"
+                ],
+                "summary": "Upload an icon for a wheel slot",
+                "description": "Multipart upload. Returns the stored URL, which is then passed as `icon_url` when saving a slot.",
+                "operationId": "0707933dbb391b1219654f707924236b",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "description": "jpg, jpeg, png, webp or gif; max 2 MB",
+                                        "type": "string",
+                                        "format": "binary"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Icon uploaded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "description": "Upload result: `url` and storage details",
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "`PERMISSION_DENIED` — needs `wheel.manage`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "`VALIDATION_FAILED` — missing file, wrong type, or larger than 2 MB",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorEnvelope"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/auth/otp/send": {
             "post": {
                 "tags": [
@@ -24479,6 +24868,119 @@
                 },
                 "type": "object"
             },
+            "LuckyWheelAdmin": {
+                "description": "One wheel, as the admin panel sees it",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": [
+                            "classic",
+                            "glory"
+                        ]
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "spin_cost": {
+                        "type": "integer"
+                    },
+                    "multi_count": {
+                        "type": "integer"
+                    },
+                    "multi_cost": {
+                        "type": "integer"
+                    },
+                    "is_active": {
+                        "type": "boolean"
+                    },
+                    "payout_rate": {
+                        "description": "Expected coins back per coin spent",
+                        "type": "number",
+                        "format": "float"
+                    },
+                    "totals": {
+                        "properties": {
+                            "spins": {
+                                "type": "integer"
+                            },
+                            "players": {
+                                "type": "integer"
+                            },
+                            "coins_in": {
+                                "type": "integer"
+                            },
+                            "coins_out": {
+                                "type": "integer"
+                            }
+                        },
+                        "type": "object"
+                    },
+                    "prizes": {
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "id": {
+                                    "type": "integer"
+                                },
+                                "position": {
+                                    "type": "integer",
+                                    "maximum": 8,
+                                    "minimum": 1
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "display_label": {
+                                    "type": "string"
+                                },
+                                "reward_type": {
+                                    "type": "string"
+                                },
+                                "reward_value": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "store_item_id": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "duration_days": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "icon_url": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "weight": {
+                                    "type": "integer"
+                                },
+                                "is_active": {
+                                    "type": "boolean"
+                                },
+                                "payable": {
+                                    "type": "boolean"
+                                },
+                                "chance": {
+                                    "description": "Share of draws this slot wins",
+                                    "type": "number",
+                                    "format": "float"
+                                },
+                                "item": {
+                                    "type": "object",
+                                    "nullable": true
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                },
+                "type": "object"
+            },
             "MobileDevice": {
                 "required": [
                     "device_id",
@@ -24970,6 +25472,10 @@
         {
             "name": "Checkin",
             "description": "Checkin"
+        },
+        {
+            "name": "Lucky Wheel",
+            "description": "Lucky Wheel"
         },
         {
             "name": "System",

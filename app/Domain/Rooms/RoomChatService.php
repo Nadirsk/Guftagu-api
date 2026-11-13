@@ -87,7 +87,7 @@ class RoomChatService
         $query = RoomMessage::query()
             ->where('room_id', $room->id)
             ->where('created_at', '>=', $joinedAt)
-            ->with('user.profile:id,user_id,display_name,avatar_url,gender');
+            ->with('user.profile:id,user_id,display_name,avatar_url,gender,country');
 
         if ($beforeId !== null) {
             $query->where('id', '<', $beforeId);

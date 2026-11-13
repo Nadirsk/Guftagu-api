@@ -17,6 +17,7 @@ use App\Models\RoomSeat;
 use App\Models\User;
 use App\Models\UserSanction;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
@@ -30,8 +31,75 @@ use Illuminate\Support\Facades\Hash;
  */
 class RoomParticipationService
 {
+    /**
+     * How long a member's heartbeat (the app's `/state` poll, every ~10 s while it is open) may
+     * stay quiet before they count as gone: app closed, phone locked, or the app left in the
+     * background. Voice rooms behave the same way — closing the app takes you off the mic.
+     */
+    public const STALE_SECONDS = 90;
+
     public function __construct(protected InventoryService $inventory)
     {
+    }
+
+    /**
+     * Takes everyone whose heartbeat has gone quiet out of their room — member row closed, seat
+     * vacated, everybody told — exactly as if they had tapped Leave. Returns how many left.
+     *
+     * Nothing tells the server an app was killed, so absence is the signal. Run from the
+     * scheduler every minute, and lazily (see {@see evictStaleThrottled}) so it still holds
+     * where the scheduler is not running.
+     */
+    public function evictStale(): int
+    {
+        $cutoff = now()->subSeconds(self::STALE_SECONDS);
+
+        $stale = RoomMember::query()
+            ->where('is_active', true)
+            ->where(fn ($q) => $q
+                ->where('last_seen_at', '<', $cutoff)
+                ->orWhere(fn ($q) => $q->whereNull('last_seen_at')->where('joined_at', '<', $cutoff)))
+            ->with(['room', 'user'])
+            ->get();
+
+        $evicted = 0;
+
+        foreach ($stale as $member) {
+            if ($member->room === null || $member->user === null) {
+                continue;
+            }
+
+            try {
+                // A live video is its host: when the host goes quiet the live is over, for everyone watching.
+                if ($member->room->isVideo() && ! $member->room->isClosed() && $member->room->owner_id === $member->user_id) {
+                    app(RoomHostService::class)->endLive($member->room, $member->user);
+                    $evicted++;
+
+                    continue;
+                }
+
+                $this->leave($member->room, $member->user);
+                $evicted++;
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        return $evicted;
+    }
+
+    /** {@see evictStale}, at most once every ten seconds across the whole app. */
+    public function evictStaleThrottled(): void
+    {
+        if (! Cache::add('rooms:evict-stale', 1, 10)) {
+            return;
+        }
+
+        try {
+            $this->evictStale();
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     /** @throws RoomException */
@@ -90,7 +158,7 @@ class RoomParticipationService
             // minimised): they are really gone, so this is a fresh arrival — a new join time,
             // which is what keeps the chat from their absence out of their view.
             $stale = $member->is_active
-                && ($member->last_seen_at === null ? $member->joined_at?->lt(now()->subSeconds(90)) : $member->last_seen_at->lt(now()->subSeconds(90)));
+                && ($member->last_seen_at === null ? $member->joined_at?->lt(now()->subSeconds(self::STALE_SECONDS)) : $member->last_seen_at->lt(now()->subSeconds(self::STALE_SECONDS)));
 
             if (! $member->is_active || $stale) {
                 $arrived = true;
@@ -192,6 +260,11 @@ class RoomParticipationService
             throw new RoomException('FORBIDDEN', 'You cannot use a seat in this room right now.', 403);
         }
 
+        // A solo live video has one stage and it is the host's; everyone else only watches.
+        if ($room->kind === Room::KIND_VIDEO && $room->owner_id !== $user->id) {
+            throw new RoomException('NO_SEATS', 'This live has no seats - you can only watch.', 409);
+        }
+
         return DB::transaction(function () use ($room, $user, $seatNumber) {
             $seat = $room->seats()->where('seat_number', $seatNumber)->lockForUpdate()->first();
 
@@ -201,6 +274,11 @@ class RoomParticipationService
 
             if ($seat->is_locked) {
                 throw new RoomException('SEAT_LOCKED', 'That seat is locked.', 409);
+            }
+
+            // Mazag: a VIP seat is for VIP members only.
+            if ($seat->is_vip && $this->inventory->activeVip($user) === null) {
+                throw new RoomException('VIP_SEAT', 'This mic slot is for VIPs only.', 403);
             }
 
             if ($seat->isOccupied() && $seat->user_id !== $user->id) {
@@ -214,6 +292,7 @@ class RoomParticipationService
                 'user_id'       => $user->id,
                 'occupied_at'   => now(),
                 'is_self_muted' => false,
+                'is_camera_on'  => $room->kind === Room::KIND_VIDEO_PARTY,
             ])->save();
             $seat->refresh();
 
@@ -323,28 +402,6 @@ class RoomParticipationService
     /** "The host removed you from this room. You can join again in 4 min." — says how long is left. */
     protected function blockedMessage(Room $room, User $user): string
     {
-        $until = UserSanction::query()
-            ->where('room_id', $room->id)
-            ->where('user_id', $user->id)
-            ->where('type', UserSanction::ROOM_BAN)
-            ->active()
-            ->max('expires_at');
-
-        if ($until === null) {
-            return 'You have been removed from this room.';
-        }
-
-        $minutes = max(1, (int) ceil(now()->diffInSeconds(Carbon::parse($until), false) / 60));
-        $days = intdiv($minutes, 1440);
-        $hours = intdiv($minutes % 1440, 60);
-        $mins = $minutes % 60;
-
-        $parts = array_filter([
-            $days ? $days.($days === 1 ? ' day' : ' days') : null,
-            $hours ? $hours.' hr' : null,
-            ($mins && $days === 0) ? $mins.' min' : null,
-        ]);
-
-        return 'The host removed you from this room. You can join again in '.implode(' ', $parts ?: ['1 min']).'.';
+        return RoomKickNotice::blocked($room, $user);
     }
 }

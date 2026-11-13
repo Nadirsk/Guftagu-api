@@ -53,9 +53,10 @@ class RoomGiftAllTest extends MobileTestCase
         [$room, $gift, $sender] = $this->scene(100);
 
         $this->postJson("{$this->base}/rooms/{$room->uuid}/gifts", ['gift_id' => $gift->id, 'to_user' => 'all', 'quantity' => 2])
-            ->assertOk()->assertJsonPath('data.all', true)->assertJsonCount(2, 'data.receivers')->assertJsonPath('data.coin_balance', 60);
+            ->assertOk()->assertJsonPath('data.all', true)->assertJsonCount(3, 'data.receivers')->assertJsonPath('data.coin_balance', 40);
 
-        Event::assertDispatchedTimes(GiftSent::class, 2);
+        // Two other mics plus the sender's own mic: 3 receivers × 2 × 10 coins = 60 spent.
+        Event::assertDispatchedTimes(GiftSent::class, 3);
         $batches = collect(Event::dispatched(GiftSent::class))->map(fn ($e) => $e[0]->batch)->unique();
         $this->assertCount(1, $batches);
         $this->assertNotNull($batches->first());

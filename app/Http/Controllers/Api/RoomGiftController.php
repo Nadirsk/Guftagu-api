@@ -60,10 +60,9 @@ class RoomGiftController extends Controller
             }
 
             return ApiResponse::success([
-                'transaction_id' => $last[0]->id,
+                'transaction_id' => $last->id,
                 'coin_balance'   => $sender->fresh()->wallet?->coin_balance ?? 0,
                 'gift'           => ['code' => $gift->code, 'animation_url' => $gift->animation_url, 'animation_type' => $gift->animation_type, 'is_fullscreen' => $gift->is_fullscreen, 'duration_ms' => $gift->duration_ms],
-                'combo_count'    => $last[1],
                 'receiver'       => null,
                 'receivers'      => $receivers->map(fn (User $u) => SocialPresenter::user($u))->all(),
                 'all'            => true,
@@ -72,7 +71,7 @@ class RoomGiftController extends Controller
 
         $receiver = User::where('uuid', $data['to_user'])->firstOrFail();
 
-        [$transaction, $comboCount] = $this->gifts->send(
+        $transaction = $this->gifts->send(
             $sender,
             $receiver,
             $gift,
@@ -93,8 +92,7 @@ class RoomGiftController extends Controller
                 'is_fullscreen'  => $gift->is_fullscreen,
                 'duration_ms'    => $gift->duration_ms,
             ],
-            'combo_count' => $comboCount,
-            'receiver'    => SocialPresenter::user($receiver),
+            'receiver' => SocialPresenter::user($receiver),
         ], 'Gift sent');
     }
 
@@ -115,7 +113,7 @@ class RoomGiftController extends Controller
 
         $rows = GiftTransaction::where('room_id', $room->id)
             ->where('created_at', '>=', $joinedAt)
-            ->with(['sender.profile:id,user_id,display_name,avatar_url,gender', 'receiver.profile:id,user_id,display_name,avatar_url,gender', 'gift:id,code,thumbnail_url,tier'])
+            ->with(['sender.profile:id,user_id,display_name,avatar_url,gender,country', 'receiver.profile:id,user_id,display_name,avatar_url,gender,country', 'gift:id,code,thumbnail_url,tier'])
             ->orderByDesc('id')
             ->limit(50)
             ->get();

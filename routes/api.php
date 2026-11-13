@@ -16,6 +16,7 @@ use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\Admin\GiftController;
 use App\Http\Controllers\Admin\GiftTargetController;
 use App\Http\Controllers\Admin\CheckinRewardController;
+use App\Http\Controllers\Admin\LuckyWheelController as AdminLuckyWheelController;
 use App\Http\Controllers\Admin\LevelController;
 use App\Http\Controllers\Admin\PermissionController;
 use App\Http\Controllers\Admin\RankingController;
@@ -42,6 +43,7 @@ use App\Http\Controllers\Api\BadgeController;
 use App\Http\Controllers\Api\PageController;
 use App\Http\Controllers\Api\BlockController;
 use App\Http\Controllers\Api\CheckinController;
+use App\Http\Controllers\Api\LuckyWheelController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\DevAuthController;
 use App\Http\Controllers\Api\EventController as AppEventController;
@@ -66,6 +68,7 @@ use App\Http\Controllers\Api\RoomChatController;
 use App\Http\Controllers\Api\RoomController as ApiRoomController;
 use App\Http\Controllers\Api\RoomEnvelopeController;
 use App\Http\Controllers\Api\RoomGiftController;
+use App\Http\Controllers\Api\RoomCallController;
 use App\Http\Controllers\Api\RoomHostController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\StoreController as ApiStoreController;
@@ -80,29 +83,29 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 | API v1
 |--------------------------------------------------------------------------
-| docs/03 §"Two consumers, two route groups, two middleware stacks":
+| docs/03 Â§"Two consumers, two route groups, two middleware stacks":
 |
-|   /api/v1/…         Flutter app    auth:sanctum + user.active
-|   /api/v1/admin/…   Vue panel      auth:sanctum-admin + permission:…
+|   /api/v1/â€¦         Flutter app    auth:sanctum + user.active
+|   /api/v1/admin/â€¦   Vue panel      auth:sanctum-admin + permission:â€¦
 |
 | The mobile group below covers epics D.3 (social graph, search, moments), D.4 (messaging)
-| and D.9c (blocks). **Token issuance is not here** — OTP login lands with D.1; until then
+| and D.9c (blocks). **Token issuance is not here** â€” OTP login lands with D.1; until then
 | a token is obtained through `Sanctum::actingAs` in tests or minted by hand in tinker.
 |
 | Every admin route carries an explicit permission. The default is deny: a route with
 | no `permission:` middleware is reachable by any authenticated admin, so anything
 | beyond self-service must name its key.
 |
-| Mobile routes carry no permission keys — there are no roles in the app. What gates them
+| Mobile routes carry no permission keys â€” there are no roles in the app. What gates them
 | is ownership and the block graph, enforced in the domain services rather than in
 | middleware, because "may I see this post" depends on the post.
 */
 
 /*
 |--------------------------------------------------------------------------
-| Mobile — social, moments, search and chat (epics D.3, D.4, D.9c)
+| Mobile â€” social, moments, search and chat (epics D.3, D.4, D.9c)
 |--------------------------------------------------------------------------
-| docs/03 §8. Identifiers are uuids throughout (docs/03 §2.4); `{profile}` is bound to a
+| docs/03 Â§8. Identifiers are uuids throughout (docs/03 Â§2.4); `{profile}` is bound to a
 | User by uuid just below, since the model's own route key stays numeric for the admin
 | routes that address users by id.
 */
@@ -111,7 +114,7 @@ Route::bind('profile', fn (string $value) => User::where('uuid', $value)->firstO
 
 /*
 |--------------------------------------------------------------------------
-| Mobile — auth & onboarding (epic D.1a)
+| Mobile â€” auth & onboarding (epic D.1a)
 |--------------------------------------------------------------------------
 | Unauthenticated: nothing here has a token yet, so each gets its own throttle rather than
 | mobile-api's per-user limiter, which would key on IP alone for every one of these.
@@ -124,10 +127,10 @@ Route::prefix('v1')->name('app.auth.')->group(function () {
     Route::post('auth/password/forgot', [AuthController::class, 'forgotPassword'])->middleware('throttle:otp-send')->name('password.forgot');
     Route::post('auth/password/reset', [AuthController::class, 'resetPassword'])->middleware('throttle:otp-verify')->name('password.reset');
 
-    // Local-only test affordance — see App\Http\Controllers\Api\DevAuthController. Mirrors
+    // Local-only test affordance â€” see App\Http\Controllers\Api\DevAuthController. Mirrors
     // Admin\DevHelperController's pattern: registered inside the environment check rather
     // than behind a permission, so outside local the route does not exist at all.
-    // Settings → About Us / Privacy Policy / Terms of use — readable before signing in.
+    // Settings â†’ About Us / Privacy Policy / Terms of use â€” readable before signing in.
     Route::get('pages/{type}', [PageController::class, 'show'])->middleware('throttle:60,1')->name('pages.show');
 
     if (app()->environment('local')) {
@@ -147,13 +150,19 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::get('checkin', [CheckinController::class, 'status'])->name('checkin.status');
     Route::post('checkin', [CheckinController::class, 'claim'])->name('checkin.claim');
 
+    // ---- Lucky Wheel (room section 575:3421)
+    Route::get('lucky-wheel', [LuckyWheelController::class, 'index'])->name('lucky-wheel.index');
+    Route::get('lucky-wheel/records', [LuckyWheelController::class, 'records'])->name('lucky-wheel.records');
+    Route::post('lucky-wheel/{mode}/spin', [LuckyWheelController::class, 'spin'])
+        ->middleware('throttle:30,1')->name('lucky-wheel.spin');
+
     // ---- campaign events: Recharge Activity, Weekly Star (A.9, D.7)
     Route::get('events', [AppEventController::class, 'index'])->name('events.index');
     Route::get('events/{eventUuid}', [AppEventController::class, 'show'])->name('events.show');
     Route::post('events/{eventUuid}/tiers/{tierId}/claim', [AppEventController::class, 'claim'])
         ->name('events.tiers.claim');
 
-    // ---- search (D.3a). Its own throttle — docs/03 §16 caps search at 30/min/user.
+    // ---- search (D.3a). Its own throttle â€” docs/03 Â§16 caps search at 30/min/user.
     Route::middleware('throttle:search')->group(function () {
         Route::get('search', [SearchController::class, 'index'])->name('search');
     });
@@ -214,7 +223,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::post('conversations', [ConversationController::class, 'store'])->name('conversations.store');
     Route::get('conversations/{conversation}', [ConversationController::class, 'show'])->name('conversations.show');
     Route::post('conversations/{conversation}/read', [ConversationController::class, 'read'])->name('conversations.read');
-    // Delivery receipts — the second tick. `delivered` is per thread, called when a
+    // Delivery receipts â€” the second tick. `delivered` is per thread, called when a
     // `message.new` frame lands; `messages/delivered` is the app-resume sweep over all of
     // them. Static segment first, or `messages` would resolve as a conversation uuid.
     Route::post('messages/delivered', [ConversationController::class, 'deliveredAll'])->name('messages.delivered');
@@ -229,7 +238,7 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::delete('conversations/{conversation}/messages/{message}', [MessageController::class, 'destroy'])
         ->name('conversations.messages.destroy');
 
-    // Sending is throttled harder than reading — docs/03 §16, "DM send 30/min/user".
+    // Sending is throttled harder than reading â€” docs/03 Â§16, "DM send 30/min/user".
     Route::post('conversations/{conversation}/gifts', [MessageController::class, 'gift'])->name('conversations.gifts.store');
     Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])
         ->middleware('throttle:dm-send')
@@ -292,18 +301,18 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
     Route::get('room-themes', [ApiRoomCatalogueController::class, 'themes'])->name('room-themes.index');
     Route::get('room-seat-templates', [ApiRoomCatalogueController::class, 'seatTemplates'])->name('room-seat-templates.index');
 
-    // ---- create a room (D.2a). Not nested under {room:uuid} — there isn't one yet.
+    // ---- create a room (D.2a). Not nested under {room:uuid} â€” there isn't one yet.
     Route::post('rooms', [RoomHostController::class, 'store'])->name('rooms.store');
-    // The caller's own room, if they have one — Party → Create My Room goes straight in.
+    // The caller's own room, if they have one â€” Party â†’ Create My Room goes straight in.
     Route::get('rooms/mine', [RoomHostController::class, 'mine'])->name('rooms.mine');
 
     // ---- other live rooms, for the in-room drawer and the Live tab. Ahead of the
     // {room:uuid} group so "live" is never read as a room uuid.
     Route::get('rooms/live', [ApiRoomController::class, 'live'])->name('rooms.live');
 
-    // ---- voice rooms: join, seats, self mic/camera (docs/03 §4). Audio/video is
+    // ---- voice rooms: join, seats, self mic/camera (docs/03 Â§4). Audio/video is
     // peer-to-peer WebRTC, signalled over the `room.{uuid}` presence channel
-    // (routes/channels.php) — nothing here mints an Agora token, there isn't one.
+    // (routes/channels.php) â€” nothing here mints an Agora token, there isn't one.
     Route::prefix('rooms/{room:uuid}')->name('rooms.')->group(function () {
         Route::get('state', [ApiRoomController::class, 'state'])->name('state');
         Route::post('join', [ApiRoomController::class, 'join'])->name('join');
@@ -314,6 +323,14 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         Route::patch('camera', [ApiRoomController::class, 'setCamera'])->name('camera');
         Route::post('raise-hand', [ApiRoomController::class, 'raiseHand'])->name('raise-hand');
 
+        // ---- private calls in a solo live video
+        Route::get('calls', [RoomCallController::class, 'index'])->name('calls.index');
+        Route::post('calls', [RoomCallController::class, 'store'])->name('calls.store');
+        Route::patch('call-settings', [RoomCallController::class, 'settings'])->name('calls.settings');
+        Route::post('calls/{call}/accept', [RoomCallController::class, 'accept'])->name('calls.accept');
+        Route::post('calls/{call}/decline', [RoomCallController::class, 'decline'])->name('calls.decline');
+        Route::post('calls/{call}/end', [RoomCallController::class, 'end'])->name('calls.end');
+
         // ---- host / co-host controls on somebody else's seat (D.2b)
         Route::post('members/{profile}/co-host', [RoomHostController::class, 'promoteCoHost'])->name('members.co-host.grant');
         Route::delete('members/{profile}/co-host', [RoomHostController::class, 'revokeCoHost'])->name('members.co-host.revoke');
@@ -321,9 +338,12 @@ Route::prefix('v1')->name('app.')->middleware(['auth:sanctum', 'user.active', 't
         Route::post('seats/{seat}/mute', [RoomHostController::class, 'muteSeat'])->name('seats.mute');
         Route::post('seats/{seat}/remove', [RoomHostController::class, 'removeFromSeat'])->name('seats.remove');
         Route::post('members/{profile}/kick', [RoomHostController::class, 'kickMember'])->name('members.kick');
+        Route::post('members/{profile}/block', [RoomHostController::class, 'blockMember'])->name('members.block');
+        Route::get('listeners', [RoomHostController::class, 'listeners'])->name('listeners');
         Route::patch('seats/{seat}/lock', [RoomHostController::class, 'lockSeat'])->name('seats.lock');
         Route::patch('announcement', [RoomHostController::class, 'setAnnouncement'])->name('announcement');
         // Room Mode (seats re-laid, everyone stood up) and Room Theme (background only).
+        Route::post('end', [RoomHostController::class, 'end'])->name('end');
         Route::patch('mode', [RoomHostController::class, 'changeMode'])->name('mode');
         Route::patch('theme', [RoomHostController::class, 'changeTheme'])->name('theme');
 
@@ -351,7 +371,7 @@ Route::prefix('v1')->group(function () {
     Route::prefix('admin')->name('admin.')->group(function () {
 
         // ---------------------------------------------------------------- public
-        // A.1a — login and the MFA step. Throttles per docs/01 §6 (login 5/min/IP).
+        // A.1a â€” login and the MFA step. Throttles per docs/01 Â§6 (login 5/min/IP).
         Route::post('auth/login', [AdminAuthController::class, 'login'])
             ->middleware('throttle:admin-login')
             ->name('auth.login');
@@ -361,7 +381,7 @@ Route::prefix('v1')->group(function () {
             ->name('auth.mfa.verify');
 
         // Local-only test affordance. Registered inside the environment check rather than
-        // behind a permission, so outside local the route does not exist at all — there is
+        // behind a permission, so outside local the route does not exist at all â€” there is
         // no gate to misconfigure. Lets Swagger's "Try it out" get past the MFA step.
         if (app()->environment('local')) {
             Route::get('dev/last-otp', [DevHelperController::class, 'lastOtp'])->name('dev.last-otp');
@@ -376,19 +396,19 @@ Route::prefix('v1')->group(function () {
             Route::patch('auth/profile', [AdminAuthController::class, 'updateProfile'])->name('auth.profile');
             Route::post('auth/password', [AdminAuthController::class, 'changePassword'])->name('auth.password');
 
-            // GFT-122 — MFA re-entry before a high-risk grant
+            // GFT-122 â€” MFA re-entry before a high-risk grant
             Route::post('auth/mfa/reauth', [AdminAuthController::class, 'requestReauth'])
                 ->middleware('throttle:admin-mfa')->name('auth.mfa.reauth');
             Route::post('auth/mfa/reauth/verify', [AdminAuthController::class, 'verifyReauth'])
                 ->middleware('throttle:admin-mfa')->name('auth.mfa.reauth.verify');
 
             // A convenience for the bilingual name fields (categories, gifts, levels, VIP
-            // tiers) — not a translated-strings feature, just a starting draft the admin
+            // tiers) â€” not a translated-strings feature, just a starting draft the admin
             // can correct. No permission key: any admin filling in a form may use it.
             Route::post('translate', [TranslateController::class, 'translate'])
                 ->middleware('throttle:admin-translate')->name('translate');
 
-            // ---- notification inbox (C.5a, general) — your own, every role, no permission key
+            // ---- notification inbox (C.5a, general) â€” your own, every role, no permission key
             Route::get('notifications', [AdminNotificationController::class, 'index'])->name('notifications.index');
             Route::post('notifications/read-all', [AdminNotificationController::class, 'markAllRead'])->name('notifications.read_all');
             Route::post('notifications/{notification}/read', [AdminNotificationController::class, 'markRead'])->name('notifications.read');
@@ -401,7 +421,7 @@ Route::prefix('v1')->group(function () {
                     ->name('settings.session-timeout');
             });
 
-            // ---- roles — IT Admin login only, same reasoning as system logs: neither
+            // ---- roles â€” IT Admin login only, same reasoning as system logs: neither
             // Super Admin's blanket permission bypass nor a direct grant of
             // `access.role_manage` is enough, only actually being IT Admin.
             Route::middleware(['permission:access.role_manage', 'role:it_admin'])->group(function () {
@@ -464,7 +484,7 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:rooms.view')->name('rooms.show');
             Route::post('rooms/{room}/close', [RoomController::class, 'close'])
                 ->middleware('permission:rooms.force_close')->name('rooms.close');
-            // B.3c — bulk promotion across a set of rooms.
+            // B.3c â€” bulk promotion across a set of rooms.
             Route::post('rooms/feature-bulk', [RoomController::class, 'featureBulk'])
                 ->middleware('permission:rooms.feature')->name('rooms.feature_bulk');
             Route::post('rooms/{room}/feature', [RoomController::class, 'feature'])
@@ -480,7 +500,7 @@ Route::prefix('v1')->group(function () {
             Route::post('rooms/{room}/seats/{seat}/vip', [RoomController::class, 'vipSeat'])
                 ->middleware('permission:rooms.seat_vip')->name('rooms.seats.vip');
 
-            // ---- live-room enforcement (C.1b, C.2a–c)
+            // ---- live-room enforcement (C.1b, C.2aâ€“c)
             Route::post('rooms/{room}/silent-join', [RoomController::class, 'silentJoin'])
                 ->middleware('permission:rooms.join_silent')->name('rooms.silent_join');
             Route::post('rooms/{room}/seats/{seat}/mute', [RoomController::class, 'muteSeat'])
@@ -493,7 +513,7 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:moderation.warn_user')->name('rooms.warn');
 
             // ---- room catalogue (A.4d)
-            // Reading the catalogue only needs rooms.view — every screen that shows a room
+            // Reading the catalogue only needs rooms.view â€” every screen that shows a room
             // needs its category name. Changing it needs rooms.theme_manage.
             Route::get('room-categories', [RoomCatalogueController::class, 'categories'])
                 ->middleware('permission:rooms.view')->name('room-categories.index');
@@ -530,7 +550,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('gifts/thumbnail', [GiftController::class, 'uploadThumbnail'])->name('gifts.thumbnail');
             });
 
-            // Restocking a limited drop is its own key — pricing a gift and deciding how
+            // Restocking a limited drop is its own key â€” pricing a gift and deciding how
             // many exist are different decisions.
             Route::post('gifts/{gift}/restock', [GiftController::class, 'restock'])
                 ->middleware('permission:gifts.drop_manage')->name('gifts.restock');
@@ -541,7 +561,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('gift-categories/icon', [GiftController::class, 'uploadCategoryIcon'])->name('gift-categories.icon');
             });
 
-            // ---- wealth/charm levels — docs/00 §7, GFT-027's ladder
+            // ---- wealth/charm levels â€” docs/00 Â§7, GFT-027's ladder
             Route::get('levels', [LevelController::class, 'index'])
                 ->middleware('permission:levels.view')->name('levels.index');
             Route::middleware('permission:levels.manage')->group(function () {
@@ -559,10 +579,20 @@ Route::prefix('v1')->group(function () {
                 Route::delete('checkin-rewards/{checkinReward}', [CheckinRewardController::class, 'destroy'])->name('checkin-rewards.destroy');
             });
 
+            // ---- Lucky Wheel: prices and the eight slots of Classic and Glory
+            Route::get('lucky-wheels', [AdminLuckyWheelController::class, 'index'])
+                ->middleware('permission:wheel.view')->name('lucky-wheels.index');
+            Route::middleware('permission:wheel.manage')->group(function () {
+                Route::patch('lucky-wheels/{wheel}', [AdminLuckyWheelController::class, 'update'])->name('lucky-wheels.update');
+                Route::put('lucky-wheels/{wheel}/prizes/{position}', [AdminLuckyWheelController::class, 'savePrize'])
+                    ->whereNumber('position')->name('lucky-wheels.prizes.save');
+                Route::post('lucky-wheels/icon', [AdminLuckyWheelController::class, 'uploadIcon'])->name('lucky-wheels.icon');
+            });
+
             // ---- VIP & cosmetics (A.6c, A.6d)
             Route::get('vip-tiers', [VipTierController::class, 'index'])
                 ->middleware('permission:vip.view')->name('vip-tiers.index');
-            // Badges only now — frames/bubbles/entry banners/entrance effects moved to
+            // Badges only now â€” frames/bubbles/entry banners/entrance effects moved to
             // store-items below, since they are purchasable catalogue items, not earned ones.
             Route::get('cosmetics', [VipTierController::class, 'cosmetics'])
                 ->middleware('permission:vip.view')->name('cosmetics.index');
@@ -574,7 +604,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('cosmetics/badges', [VipTierController::class, 'storeBadge'])->name('cosmetics.badges.store');
             });
 
-            // ---- store items — the app's "Mall": frames, bubbles, entry banners, entrance
+            // ---- store items â€” the app's "Mall": frames, bubbles, entry banners, entrance
             // effects. Reuses the vip.* permissions since these were vip.manage-gated
             // already as frames/effects, before the store_items unification.
             Route::get('store-items', [StoreItemController::class, 'index'])
@@ -649,7 +679,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('events/{event}/draw', [EventController::class, 'runDraw'])->name('events.draw');
             });
 
-            // Anyone who can see an event can check a published draw — that is the point
+            // Anyone who can see an event can check a published draw â€” that is the point
             // of provable fairness.
             Route::get('events/{event}/draw/verify', [EventController::class, 'verifyDraw'])
                 ->middleware('permission:events.view')->name('events.draw.verify');
@@ -662,7 +692,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('events/{event}/distribute', [EventController::class, 'distribute'])->name('events.distribute');
             });
 
-            // ---- campaign event tiers — recharge_activity, weekly_star (the Event Builder)
+            // ---- campaign event tiers â€” recharge_activity, weekly_star (the Event Builder)
             Route::get('events/{event}/tiers', [EventController::class, 'tiers'])
                 ->middleware('permission:events.view')->name('events.tiers.index');
             Route::get('events/{event}/progress', [EventController::class, 'progress'])
@@ -697,7 +727,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('weekly-stars/{event}/settle', [WeeklyStarController::class, 'settle'])->name('weekly-stars.settle');
             });
 
-            // ---- reward catalog — the admin-manageable list every event's tier bundles draw from
+            // ---- reward catalog â€” the admin-manageable list every event's tier bundles draw from
             Route::get('reward-catalog', [RewardCatalogController::class, 'index'])
                 ->middleware('permission:events.view')->name('reward-catalog.index');
 
@@ -781,7 +811,7 @@ Route::prefix('v1')->group(function () {
             Route::post('moderation/banned-words/import', [BannedWordController::class, 'import'])
                 ->middleware('permission:moderation.bannedwords_manage')->name('moderation.words.import');
             // Dry run against the live list. Read-only, so it sits behind logs_view rather
-            // than the manage permission — checking what a rule does is not editing it.
+            // than the manage permission â€” checking what a rule does is not editing it.
             Route::post('moderation/filter-test', [BannedWordController::class, 'test'])
                 ->middleware('permission:moderation.logs_view')->name('moderation.filter.test');
             Route::get('moderation/flags', [BannedWordController::class, 'flags'])
@@ -1020,7 +1050,7 @@ Route::prefix('v1')->group(function () {
             Route::get('audit-logs/{log}', [AuditLogController::class, 'show'])
                 ->middleware('permission:access.audit_view')->name('audit.show');
 
-            // ---- system logs — IT Admin login only. Deliberately gated by role identity
+            // ---- system logs â€” IT Admin login only. Deliberately gated by role identity
             // (`role:it_admin`) rather than the permission system alone: Super Admin's
             // blanket permission bypass and any direct grant of `system.logs_view` must
             // NOT be enough to see this screen, only actually being IT Admin.

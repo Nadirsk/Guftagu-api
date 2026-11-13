@@ -289,7 +289,7 @@ class PostService
     public function feed(?User $viewer, string $scope, ?int $afterId, int $limit, ?User $profile = null): array
     {
         $query = Post::query()
-            ->with(['author.profile:id,user_id,display_name,avatar_url,gender'])
+            ->with(['author.profile:id,user_id,display_name,avatar_url,gender,country'])
             ->visibleTo($viewer);
 
         // The Moment tab is "people I have not followed yet", so it is not the
@@ -344,7 +344,7 @@ class PostService
             throw SocialException::notVisible();
         }
 
-        return $post->load(['author.profile:id,user_id,display_name,avatar_url,gender']);
+        return $post->load(['author.profile:id,user_id,display_name,avatar_url,gender,country']);
     }
 
     /**
@@ -358,7 +358,7 @@ class PostService
 
         $query = PostComment::query()
             ->where('post_id', $post->id)
-            ->with(['author.profile:id,user_id,display_name,avatar_url,gender']);
+            ->with(['author.profile:id,user_id,display_name,avatar_url,gender,country']);
 
         if ($viewer !== null) {
             // A blocked person's comments disappear from the thread in both directions —
@@ -403,7 +403,7 @@ class PostService
 
         $query = PostLike::query()
             ->where('post_id', $post->id)
-            ->with(['user.profile:id,user_id,display_name,avatar_url,gender']);
+            ->with(['user.profile:id,user_id,display_name,avatar_url,gender,country']);
 
         if ($viewer !== null) {
             $query->whereNotExists(fn ($sub) => $sub

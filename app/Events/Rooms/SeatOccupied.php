@@ -24,6 +24,8 @@ class SeatOccupied implements ShouldBroadcastNow
         public Room $room,
         public RoomSeat $seat,
         public User $user,
+        /** 'owner' or 'admin' when they were put here with "Take on the Mic"; null when they sat down themselves. */
+        public ?string $placedBy = null,
     ) {
     }
 
@@ -45,6 +47,7 @@ class SeatOccupied implements ShouldBroadcastNow
             'seat_number' => $this->seat->seat_number,
             'is_vip'      => $this->seat->is_vip,
             'user'        => SocialPresenter::user($this->user),
+            'placed_by'   => $this->placedBy,
         ];
     }
 }

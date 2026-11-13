@@ -3,6 +3,7 @@
 namespace App\Domain\Rooms;
 
 use App\Domain\Store\InventoryService;
+use App\Events\Rooms\MemberKicked;
 use App\Events\Rooms\MemberRoleChanged;
 use App\Events\Rooms\RoomAnnouncementUpdated;
 use App\Events\Rooms\SeatLockToggled;
@@ -31,10 +32,70 @@ use Illuminate\Support\Facades\DB;
  */
 class RoomHostService
 {
+    /**
+     * Ends a live video. The owner only; a voice room is a standing room and is never ended
+     * this way. Everyone is moved out, the seats emptied, and the room closed so it drops
+     * off the Live tab and a late joiner is told it has ended.
+     *
+     * @return array{audience: int, diamonds: int, duration_seconds: int}
+     *
+     * @throws RoomException
+     */
+    public function endLive(Room $room, User $actor): array
+    {
+        $this->assertIsOwner($room, $actor);
+
+        if (! $room->isVideo()) {
+            throw new RoomException('BAD_REQUEST', 'Only a live video can be ended.', 400);
+        }
+
+        if (! $room->isClosed()) {
+            app(RoomCallService::class)->endAllFor($room);
+            DB::transaction(function () use ($room) {
+                RoomMember::query()
+                    ->where('room_id', $room->id)
+                    ->where('is_active', true)
+                    ->update([
+                        'is_active'        => false,
+                        'left_at'          => now(),
+                        'duration_seconds' => DB::raw('TIMESTAMPDIFF(SECOND, joined_at, NOW())'),
+                    ]);
+
+                $room->seats()->update(['user_id' => null, 'occupied_at' => null, 'is_camera_on' => false]);
+
+                $room->forceFill([
+                    'status'         => Room::CLOSED,
+                    'closed_by'      => null,
+                    'close_reason'   => 'ended_by_host',
+                    'ended_at'       => now(),
+                    'listener_count' => 0,
+                    'is_featured'    => false,
+                    'is_pinned'      => false,
+                ])->save();
+            });
+
+            try {
+                RoomUpdated::dispatch($room->fresh('theme'), RoomUpdated::CLOSED);
+            } catch (\Throwable $e) {
+                // The close has committed; viewers also find out from their next state poll.
+                report($e);
+            }
+        }
+
+        $room->refresh();
+
+        return [
+            // Distinct people who were ever in the room, the owner not counted.
+            'audience'         => RoomMember::query()->where('room_id', $room->id)->where('user_id', '!=', $actor->id)->count(),
+            'diamonds'         => (int) $room->total_diamonds_received,
+            'duration_seconds' => (int) ($room->started_at && $room->ended_at ? $room->started_at->diffInSeconds($room->ended_at) : 0),
+        ];
+    }
+
     /** @throws RoomException */
     public function promoteCoHost(Room $room, User $actor, User $target): RoomMember
     {
-        $this->assertIsHost($room, $actor);
+        $this->assertIsOwner($room, $actor);
 
         $member = $this->activeMember($room, $target);
 
@@ -56,7 +117,7 @@ class RoomHostService
     /** @throws RoomException */
     public function revokeCoHost(Room $room, User $actor, User $target): RoomMember
     {
-        $this->assertIsHost($room, $actor);
+        $this->assertIsOwner($room, $actor);
 
         $member = $this->activeMember($room, $target);
 
@@ -84,16 +145,23 @@ class RoomHostService
             throw new RoomException('FORBIDDEN', 'That person cannot be seated in this room right now.', 403);
         }
 
-        return DB::transaction(function () use ($room, $target, $seatNumber) {
+        $placedBy = $this->actorRole($room, $actor);
+
+        return DB::transaction(function () use ($room, $target, $seatNumber, $placedBy) {
             $seat = $room->seats()->where('seat_number', $seatNumber)->lockForUpdate()->first();
 
             if ($seat === null) {
                 throw new RoomException('NOT_FOUND', 'That seat does not exist in this room.', 404);
             }
 
-            if ($seat->is_locked) {
-                throw new RoomException('SEAT_LOCKED', 'That seat is locked — unlock it first.', 409);
+            // A VIP seat takes VIP members only — the owner or admin is told why, rather than
+            // Mazag's silent nothing.
+            if ($seat->is_vip && app(InventoryService::class)->activeVip($target) === null) {
+                throw new RoomException('VIP_SEAT', 'This mic slot is for VIPs only.', 403);
             }
+
+            // "Take on the Mic" on a locked seat: choosing someone for it unlocks it.
+            $wasLocked = $seat->is_locked;
 
             if ($seat->isOccupied() && $seat->user_id !== $target->id) {
                 throw new RoomException('SEAT_TAKEN', 'Someone is already sitting there.', 409);
@@ -108,9 +176,16 @@ class RoomHostService
             $seat->forceFill([
                 'user_id'       => $target->id,
                 'occupied_at'   => now(),
-                'is_self_muted' => false,
+                // Mazag: someone put on a mic by the owner or an admin starts with it off and is
+                // told to turn it on if they want to speak.
+                'is_self_muted' => true,
+                'is_locked'     => false,
             ])->save();
             $seat->refresh();
+
+            if ($wasLocked) {
+                SeatLockToggled::dispatch($room, $seatNumber, false);
+            }
 
             if (! $wasActive) {
                 RoomMember::updateOrCreate(
@@ -119,10 +194,38 @@ class RoomHostService
                 );
             }
 
-            SeatOccupied::dispatch($room, $seat, $target);
+            SeatOccupied::dispatch($room, $seat, $target, $placedBy);
 
             return $seat;
         });
+    }
+
+    /**
+     * "Take on the Mic" → Online listeners: everyone in the room who is not on a mic,
+     * newest arrival first, for the owner or an admin to put on a seat.
+     *
+     * @return \Illuminate\Support\Collection<int, User>
+     *
+     * @throws RoomException
+     */
+    public function listeners(Room $room, User $actor): \Illuminate\Support\Collection
+    {
+        $this->assertIsHost($room, $actor);
+
+        $seated = $room->seats()->whereNotNull('user_id')->pluck('user_id');
+
+        return RoomMember::query()
+            ->where('room_id', $room->id)
+            ->where('is_active', true)
+            ->whereNotIn('user_id', $seated)
+            ->where('user_id', '!=', $actor->id)
+            ->with('user.profile')
+            ->orderByDesc('joined_at')
+            ->limit(200)
+            ->get()
+            ->map(fn (RoomMember $m) => $m->user)
+            ->filter()
+            ->values();
     }
 
     /** @throws RoomException */
@@ -136,9 +239,10 @@ class RoomHostService
             throw new RoomException('NOT_FOUND', 'That seat does not exist in this room.', 404);
         }
 
-        if (! $seat->isOccupied()) {
-            throw new RoomException('BAD_REQUEST', 'That seat is empty. There is nobody to mute.', 400);
-        }
+        // An empty seat can be muted too (Mazag's empty-seat sheet offers it): whoever sits
+        // there next starts muted. An admin may lift a mute on their own seat (their seat sheet offers "UnMute the Mic"),
+        // but never touch the owner's seat or another admin's.
+        $this->assertMayModerate($room, $actor, $seat->user_id);
 
         $seat->forceFill(['is_muted_by_owner' => $muted])->save();
 
@@ -233,6 +337,8 @@ class RoomHostService
             return;
         }
 
+        $this->assertMayModerate($room, $actor, $seat->user_id);
+
         $user = $seat->user;
 
         $seat->forceFill([
@@ -257,11 +363,38 @@ class RoomHostService
      */
     public function kickMember(Room $room, User $actor, User $target, int $minutes): void
     {
+        $this->putOut($room, $actor, $target, $minutes, block: false);
+    }
+
+    /**
+     * "Add to block list": out of the room like a kick, but with no end — a room ban with no
+     * `expires_at` that only staff (or a later block-list screen) lifts.
+     *
+     * @throws RoomException
+     */
+    public function blockMember(Room $room, User $actor, User $target): void
+    {
+        $this->putOut($room, $actor, $target, null, block: true);
+    }
+
+    /**
+     * Kick-Out and Block share this: out of the room and off the mic, and kept out — for
+     * `$minutes`, or with no end for a block. The re-entry block is the same room-scoped
+     * `UserSanction` staff kicks write (see {@see RoomModerationService::kick}), so
+     * `Room::isBlockedForUser()` enforces all of them. `issued_by` stays null — that column
+     * points at `admin_users`, and a host is not one. Their admin role, if any, is kept.
+     *
+     * @throws RoomException
+     */
+    protected function putOut(Room $room, User $actor, User $target, ?int $minutes, bool $block): void
+    {
         $this->assertIsHost($room, $actor);
 
         if ($target->id === $actor->id || $target->id === $room->owner_id) {
-            throw new RoomException('BAD_REQUEST', 'You cannot kick that person out of this room.', 400);
+            throw new RoomException('BAD_REQUEST', $block ? 'You cannot block that person.' : 'You cannot kick that person out of this room.', 400);
         }
+
+        $this->assertMayModerate($room, $actor, $target->id);
 
         $member = $this->activeMember($room, $target);
 
@@ -269,11 +402,17 @@ class RoomHostService
             throw new RoomException('NOT_FOUND', 'That person is not currently in this room.', 404);
         }
 
-        $seatNumber = DB::transaction(function () use ($room, $member, $target, $minutes) {
+        $by = $this->actorRole($room, $actor);
+        $reason = $block
+            ? ($by === 'owner' ? RoomKickNotice::REASON_BLOCK_OWNER : RoomKickNotice::REASON_BLOCK_ADMIN)
+            : ($by === 'owner' ? RoomKickNotice::REASON_OWNER : RoomKickNotice::REASON_ADMIN);
+
+        $seatNumber = DB::transaction(function () use ($room, $member, $target, $minutes, $reason) {
             $member->forceFill([
                 'is_active'        => false,
                 'left_at'          => now(),
                 'duration_seconds' => $member->joined_at?->diffInSeconds(now()) ?? 0,
+                'hand_raised_at'   => null,
             ])->save();
 
             $seat = $room->seats()->where('user_id', $target->id)->first();
@@ -290,9 +429,9 @@ class RoomHostService
                 'type'       => UserSanction::ROOM_BAN,
                 'scope'      => 'room',
                 'room_id'    => $room->id,
-                'reason'     => 'Kicked out by the room host',
+                'reason'     => $reason,
                 'starts_at'  => now(),
-                'expires_at' => now()->addMinutes($minutes),
+                'expires_at' => $minutes === null ? null : now()->addMinutes($minutes),
                 'is_active'  => true,
             ]);
 
@@ -302,6 +441,10 @@ class RoomHostService
         if ($seatNumber !== null) {
             SeatVacated::dispatch($room, $seatNumber, $target);
         }
+
+        // The kicked person's app is still on the room screen: this is what closes it and
+        // tells them who did it and for how long. The kick itself has already committed.
+        $this->announce(new MemberKicked($room, $target, $by, $minutes, $room->activeMembers()->count(), $block));
     }
 
     /** @throws RoomException */
@@ -354,6 +497,57 @@ class RoomHostService
 
         if (! $isCoHost) {
             throw new RoomException('FORBIDDEN', 'Only the host or a co-host can do that.', 403);
+        }
+    }
+
+    /**
+     * The owner may act on anyone; an admin on ordinary members and on themselves, never on
+     * the owner or another admin (their seat sheet only offers gift, profile and Clear charm).
+     *
+     * @throws RoomException
+     */
+    protected function assertMayModerate(Room $room, User $actor, ?int $targetId): void
+    {
+        if ($targetId === null || $targetId === $actor->id || $room->owner_id === $actor->id) {
+            return;
+        }
+
+        if ($targetId === $room->owner_id) {
+            throw new RoomException('FORBIDDEN', 'You cannot do that to the room owner.', 403);
+        }
+
+        $targetIsAdmin = RoomMember::query()
+            ->where('room_id', $room->id)
+            ->where('user_id', $targetId)
+            ->where('role', RoomMember::CO_HOST)
+            ->exists();
+
+        if ($targetIsAdmin) {
+            throw new RoomException('FORBIDDEN', 'Only the room owner can do that to another admin.', 403);
+        }
+    }
+
+    /** `owner` or `admin` — who the other side's notice names. */
+    protected function actorRole(Room $room, User $actor): string
+    {
+        return $room->owner_id === $actor->id ? 'owner' : 'admin';
+    }
+
+    /** Broadcasts after the change has committed; a socket hiccup is reported, not thrown. */
+    protected function announce(object $event): void
+    {
+        try {
+            event($event);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
+
+    /** Only the owner makes or unmakes admins (co-hosts); an admin cannot appoint more. */
+    protected function assertIsOwner(Room $room, User $actor): void
+    {
+        if ($room->owner_id !== $actor->id) {
+            throw new RoomException('FORBIDDEN', 'Only the room owner can change admins.', 403);
         }
     }
 

@@ -99,7 +99,7 @@ class AgencyController extends Controller
             ->whereIn('agency_id', $agencyIds)
             ->pending()
             ->with('user:id,guftagu_id')
-            ->with('user.profile:id,user_id,display_name,avatar_url,gender')
+            ->with('user.profile:id,user_id,display_name,avatar_url,gender,country')
             ->latest('id')
             ->get();
 
